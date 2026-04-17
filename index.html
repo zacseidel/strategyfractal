@@ -92,53 +92,43 @@
       </aside>
 
       <main class="main">
-        <div class="main-scroll">
-          <section id="topTopicsPanel" class="panel">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">Top-Level Topics</div>
-                <div class="panel-subtitle">Drag to reorder. Hide this strip when you want a one-topic-at-a-time workspace.</div>
-              </div>
-              <div class="status">
-                <span class="pill">Drag groups to reorder</span>
-                <span class="pill">Auto-saved locally</span>
-                <span class="pill">Import/export ready</span>
-              </div>
+        <section id="topTopicsPanel" class="panel topics-strip">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Top-Level Topics</div>
+              <div class="panel-subtitle">Drag to reorder. Hide this strip when you want a one-topic-at-a-time workspace.</div>
             </div>
-            <div class="panel-body">
-              <div id="rootLane" class="root-lane"></div>
+            <div class="status">
+              <span class="pill">Drag to reorder</span>
+              <span class="pill">Auto-saved locally</span>
+              <span class="pill">Import/export ready</span>
             </div>
-          </section>
-
-          <div id="boardView" class="board-stack">
-            <section class="focus-stage">
-<div class="canvas-zone">
-                <div id="contextTrail" class="context-trail"></div>
-                <div class="focus-card-wrap">
-                  <div id="focusCardMount"></div>
-                </div>
-                <div id="orbit" class="orbit"></div>
-              </div>
-              <div id="branchDock" class="branch-dock"></div>
-            </section>
           </div>
+          <div class="panel-body">
+            <div id="rootLane" class="root-lane"></div>
+          </div>
+        </section>
 
-          <section id="outlineView" class="panel hidden">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">Outline Workspace</div>
-                <div class="panel-subtitle">This mirrors the export: breadth-first overview first, then drill-down into each populated branch.</div>
-              </div>
-              <div class="status">
-                <span class="pill">Only meaningful branches render</span>
-                <span class="pill">Use JSON export to resume sessions</span>
-              </div>
-            </div>
-            <div class="panel-body">
-              <pre id="outlineViewText" class="export-text"></pre>
-            </div>
-          </section>
+        <div id="boardView" class="canvas-viewport">
+          <svg id="connectionLayer" class="connection-svg"></svg>
+          <div id="canvasWorld" class="canvas-world"></div>
         </div>
+
+        <section id="outlineView" class="panel hidden">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Outline Workspace</div>
+              <div class="panel-subtitle">This mirrors the export: breadth-first overview first, then drill-down into each populated branch.</div>
+            </div>
+            <div class="status">
+              <span class="pill">Only meaningful branches render</span>
+              <span class="pill">Use JSON export to resume sessions</span>
+            </div>
+          </div>
+          <div class="panel-body">
+            <pre id="outlineViewText" class="export-text"></pre>
+          </div>
+        </section>
       </main>
     </div>
   </div>

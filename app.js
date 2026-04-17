@@ -2,20 +2,25 @@
   const STORAGE_KEY = 'strategyfractal-state-v2';
   const DEFAULT_QUESTIONS = ['Why', 'What', 'How', 'Who'];
   const THEMES = ['modern', 'sticky', 'playful', 'minimal'];
+  const ZOOM_MIN = 0.12;
+  const ZOOM_MAX = 2.0;
+  const COLUMN_WIDTH = 420;
+  const ROW_GAP = 24;
+  const NODE_W_TOPIC = 300;
+  const NODE_W_QUESTION = 340;
 
   const els = {
     workspace: document.getElementById('workspace'),
     topTopicsPanel: document.getElementById('topTopicsPanel'),
     rootLane: document.getElementById('rootLane'),
-    focusCardMount: document.getElementById('focusCardMount'),
-    orbit: document.getElementById('orbit'),
-    branchDock: document.getElementById('branchDock'),
     outlineTree: document.getElementById('outlineTree'),
     outlineText: document.getElementById('outlineText'),
     outlineViewText: document.getElementById('outlineViewText'),
     selectionPill: document.getElementById('selectionPill'),
     boardView: document.getElementById('boardView'),
     outlineView: document.getElementById('outlineView'),
+    canvasWorld: document.getElementById('canvasWorld'),
+    connectionLayer: document.getElementById('connectionLayer'),
     newRootBtn: document.getElementById('newRootBtn'),
     addQuestionBtn: document.getElementById('addQuestionBtn'),
     addAnswerBtn: document.getElementById('addAnswerBtn'),
@@ -41,16 +46,16 @@
     closeModalBtn: document.getElementById('closeModalBtn'),
     examplesBtn: document.getElementById('examplesBtn'),
     examplesDropdown: document.getElementById('examplesDropdown'),
-    canvasZone: document.querySelector('.canvas-zone'),
-    focusCardWrap: document.querySelector('.focus-card-wrap')
   };
 
   let state = loadState() || createInitialState();
   let dragState = null;
   let toastTimer = null;
-  let pushedThisFocus = false;
   let examplesManifest = null;
-  let navStack = [];
+  let isPanning = false;
+  let panStart = { x: 0, y: 0 };
+
+  // ── Initial state ─────────────────────────────────────────────────────────
 
   function createInitialState() {
     const s = {
@@ -65,6 +70,7 @@
         selectedItemId: null,
         activeQuestionId: null,
         search: '',
+        canvas: { panX: 60, panY: 60, scale: 1.0 },
       },
       roots: [],
       entities: {
@@ -84,9 +90,10 @@
     const first = createItemInternal(s, { kind: 'topic', text: '' });
     s.roots.push(first.id);
     s.ui.selectedItemId = first.id;
-    s.ui.activeQuestionId = null;
     return s;
   }
+
+  // ── Entity creation ───────────────────────────────────────────────────────
 
   function uid(prefix) {
     return prefix + '-' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -101,6 +108,8 @@
       questionIds: [],
       parentQuestionId,
       sourceList: [],
+      nodeMode: 'expanded',
+      pos: { x: 0, y: 0 },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -118,12 +127,15 @@
       parentItemId,
       label,
       answerIds: [],
+      pos: { x: 0, y: 0 },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
     targetState.entities.items[parentItemId].questionIds.push(id);
     return targetState.entities.questions[id];
   }
+
+  // ── History / persistence ─────────────────────────────────────────────────
 
   function deepClone(obj) {
     return JSON.parse(JSON.stringify(obj));
@@ -159,7 +171,8 @@
   function normalizeState() {
     if (!state.settings) state.settings = { theme: 'modern', mainView: 'board', sidebarOpen: true, showTopTopics: true };
     if (typeof state.settings.showTopTopics !== 'boolean') state.settings.showTopTopics = true;
-    if (!state.ui) state.ui = { selectedItemId: state.roots[0] || null, activeQuestionId: null, search: '' };
+    if (!state.ui) state.ui = { selectedItemId: null, activeQuestionId: null, search: '', canvas: { panX: 60, panY: 60, scale: 1.0 } };
+    if (!state.ui.canvas) state.ui.canvas = { panX: 60, panY: 60, scale: 1.0 };
     if (!state.history) state.history = { past: [], future: [] };
     if (!state.entities) state.entities = { items: {}, questions: {} };
     if (!Array.isArray(state.roots)) state.roots = [];
@@ -173,14 +186,17 @@
     Object.values(state.entities.items).forEach(item => {
       if (!Array.isArray(item.questionIds)) item.questionIds = [];
       if (!Array.isArray(item.sourceList)) item.sourceList = [];
+      if (!item.nodeMode) item.nodeMode = 'collapsed';
+      if (!item.pos) item.pos = { x: 0, y: 0 };
     });
     Object.values(state.entities.questions).forEach(q => {
       if (!Array.isArray(q.answerIds)) q.answerIds = [];
+      if (!q.pos) q.pos = { x: 0, y: 0 };
     });
 
-    if (!state.entities.items[state.ui.selectedItemId]) state.ui.selectedItemId = state.roots[0] || null;
-    const selected = getSelectedItem();
-    if (!selected || !selected.questionIds.includes(state.ui.activeQuestionId)) state.ui.activeQuestionId = null;
+    if (!state.entities.items[state.ui.selectedItemId]) {
+      state.ui.selectedItemId = state.roots[0] || null;
+    }
   }
 
   function undo() {
@@ -222,13 +238,16 @@
       if (!parsed.history) parsed.history = { past: [], future: [] };
       if (!parsed.settings) parsed.settings = { theme: 'modern', mainView: 'board', sidebarOpen: true, showTopTopics: true };
       if (typeof parsed.settings.showTopTopics !== 'boolean') parsed.settings.showTopTopics = true;
-      if (!parsed.ui) parsed.ui = { selectedItemId: parsed.roots[0] || null, activeQuestionId: null, search: '' };
+      if (!parsed.ui) parsed.ui = { selectedItemId: parsed.roots[0] || null, activeQuestionId: null, search: '', canvas: { panX: 60, panY: 60, scale: 1.0 } };
+      if (!parsed.ui.canvas) parsed.ui.canvas = { panX: 60, panY: 60, scale: 1.0 };
       return parsed;
     } catch (err) {
       console.warn('Failed to load state:', err);
       return null;
     }
   }
+
+  // ── State helpers ─────────────────────────────────────────────────────────
 
   function normalizeLabel(label) {
     return (label || '').trim().toLowerCase();
@@ -257,10 +276,6 @@
     return state.entities.items[state.ui.selectedItemId] || null;
   }
 
-  function getActiveQuestion() {
-    return state.entities.questions[state.ui.activeQuestionId] || null;
-  }
-
   function findQuestionByLabel(parentItemId, label) {
     const item = state.entities.items[parentItemId];
     if (!item) return null;
@@ -270,329 +285,24 @@
       .find(q => normalizeLabel(q?.label) === target) || null;
   }
 
-  function findFirstMeaningfulQuestionId(item) {
-    if (!item) return null;
-    const meaningful = item.questionIds.find(qid => isQuestionMeaningful(state.entities.questions[qid]));
-    return meaningful || item.questionIds[0] || null;
-  }
-
-  function _selectItem(itemId, preferredQuestionId = null) {
-    const item = state.entities.items[itemId];
-    if (!item) return;
+  function setFocusedNode(itemId) {
     state.ui.selectedItemId = itemId;
-    if (preferredQuestionId && state.entities.questions[preferredQuestionId] && item.questionIds.includes(preferredQuestionId)) {
-      state.ui.activeQuestionId = preferredQuestionId;
-    } else if (state.ui.activeQuestionId && item.questionIds.includes(state.ui.activeQuestionId)) {
-      // keep current
-    } else {
-      state.ui.activeQuestionId = findFirstMeaningfulQuestionId(item) || null;
-    }
     persist();
-    render();
-  }
-
-  function selectItem(itemId, preferredQuestionId = null) {
-    navStack = [];
-    _selectItem(itemId, preferredQuestionId);
-  }
-
-  function drillInto(itemId) {
-    if (navStack.length < 20) {
-      navStack.push({ itemId: state.ui.selectedItemId, questionId: state.ui.activeQuestionId });
-    }
-    _selectItem(itemId);
-  }
-
-  function navigateBack() {
-    if (!navStack.length) return;
-    const prev = navStack.pop();
-    _selectItem(prev.itemId, prev.questionId);
-  }
-
-  function navigateToDepth(depth) {
-    const target = navStack[depth];
-    if (!target) return;
-    navStack = navStack.slice(0, depth);
-    _selectItem(target.itemId, target.questionId);
-  }
-
-  function addRoot() {
-    pushHistory();
-    const item = createItemInternal(state, { kind: 'topic', text: '' });
-    state.roots.push(item.id);
-    state.ui.selectedItemId = item.id;
-    state.ui.activeQuestionId = null;
-    persist();
-    render();
-    requestAnimationFrame(() => focusEditable(`[data-item-text="${item.id}"]`));
-  }
-
-  function addCustomQuestion(parentItemId, label = '') {
-    const item = state.entities.items[parentItemId];
-    if (!item) return;
-    if (!label) {
-      openModal({
-        title: 'New Custom Question',
-        subtitle: 'Name this custom question branch.',
-        initialValue: 'Custom',
-        actions: [
-          { label: 'Add', primary: true, onClick: value => {
-            closeModal();
-            _commitAddCustomQuestion(parentItemId, (value || '').trim() || 'Custom');
-          }},
-          { label: 'Cancel', onClick: closeModal },
-        ],
-      });
-      return;
-    }
-    _commitAddCustomQuestion(parentItemId, (label || '').trim() || 'Custom');
-  }
-
-  function _commitAddCustomQuestion(parentItemId, chosen) {
-    pushHistory();
-    const q = createQuestionInternal(state, parentItemId, chosen);
-    state.ui.activeQuestionId = q.id;
-    persist();
-    render();
-    requestAnimationFrame(() => {
-      const target = document.querySelector(`[data-question-label="${q.id}"]`);
-      if (target) focusEditable(`[data-question-label="${q.id}"]`);
-    });
-  }
-
-  function activateDefaultQuestion(parentItemId, label) {
-    const item = state.entities.items[parentItemId];
-    if (!item) return;
-    const existing = findQuestionByLabel(parentItemId, label);
-    if (existing) {
-      state.ui.activeQuestionId = existing.id;
-      persist();
-      renderBranchDock();
-      renderOrbit(item);
-      renderOutlineTree();
-      renderOutlineText();
-      updateButtons();
-      return;
-    }
-    pushHistory();
-    const q = createQuestionInternal(state, parentItemId, label);
-    state.ui.activeQuestionId = q.id;
-    persist();
-    render();
-  }
-
-  function addAnswer(parentQuestionId) {
-    const q = state.entities.questions[parentQuestionId];
-    if (!q) return;
-    pushHistory();
-    const item = createItemInternal(state, { kind: 'answer', text: '', parentQuestionId });
-    state.ui.selectedItemId = q.parentItemId;
-    state.ui.activeQuestionId = q.id;
-    persist();
-    render();
-    requestAnimationFrame(() => focusEditable(`[data-item-text="${item.id}"]`));
-  }
-
-  function focusEditable(selector) {
-    const el = document.querySelector(selector);
-    if (!el) return;
-    el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-
-  function deleteQuestion(questionId) {
-    const q = state.entities.questions[questionId];
-    if (!q) return;
-    openConfirm(
-      'Delete Question Branch',
-      'This will delete the question and all nested answers beneath it.',
-      () => {
-        pushHistory();
-        const parentItemId = q.parentItemId;
-        deleteQuestionRecursive(questionId);
-        const parentItem = state.entities.items[parentItemId];
-        if (parentItem) {
-          parentItem.questionIds = parentItem.questionIds.filter(id => id !== questionId);
-        }
-        if (state.ui.activeQuestionId === questionId) state.ui.activeQuestionId = null;
-        persist();
-        render();
-      }
-    );
-  }
-
-  function deleteQuestionRecursive(questionId) {
-    const q = state.entities.questions[questionId];
-    if (!q) return;
-    q.answerIds.slice().forEach(answerId => deleteItemRecursive(answerId));
-    delete state.entities.questions[questionId];
-  }
-
-  function deleteItemRecursive(itemId) {
-    const item = state.entities.items[itemId];
-    if (!item) return;
-    item.questionIds.slice().forEach(questionId => deleteQuestionRecursive(questionId));
-    if (item.parentQuestionId) {
-      const pq = state.entities.questions[item.parentQuestionId];
-      if (pq) pq.answerIds = pq.answerIds.filter(id => id !== itemId);
-    }
-    state.roots = state.roots.filter(id => id !== itemId);
-    if (state.ui.selectedItemId === itemId) {
-      if (item.parentQuestionId) {
-        const pq = state.entities.questions[item.parentQuestionId];
-        state.ui.selectedItemId = pq?.parentItemId || state.roots[0] || null;
-        state.ui.activeQuestionId = pq?.id || null;
-      } else {
-        state.ui.selectedItemId = state.roots[0] || null;
-        state.ui.activeQuestionId = null;
-      }
-    }
-    delete state.entities.items[itemId];
-  }
-
-  function deleteItem(itemId) {
-    const item = state.entities.items[itemId];
-    if (!item) return;
-    openConfirm(
-      'Delete Card',
-      'This will delete the card and all nested branches beneath it.',
-      () => {
-        pushHistory();
-        deleteItemRecursive(itemId);
-        normalizeState();
-        persist();
-        render();
-      }
-    );
-  }
-
-  function updateItemText(itemId, text) {
-    const item = state.entities.items[itemId];
-    if (!item) return;
-    item.text = text;
-    item.updatedAt = Date.now();
-    persist();
-    renderSideEffectsOnly();
-  }
-
-  function updateQuestionLabel(questionId, label) {
-    const q = state.entities.questions[questionId];
-    if (!q) return;
-    q.label = label;
-    q.updatedAt = Date.now();
-    persist();
-    render();
-  }
-
-  function addSource(itemId) {
-    const item = state.entities.items[itemId];
-    if (!item) return;
-    pushHistory();
-    item.sourceList.push({ id: uid('src'), label: '', url: '', note: '' });
-    persist();
-    render();
-  }
-
-  function updateSource(itemId, sourceId, key, value) {
-    const item = state.entities.items[itemId];
-    if (!item) return;
-    const source = item.sourceList.find(s => s.id === sourceId);
-    if (!source) return;
-    source[key] = value;
-    item.updatedAt = Date.now();
-    persist();
-    renderSideEffectsOnly();
-  }
-
-  function deleteSource(itemId, sourceId) {
-    const item = state.entities.items[itemId];
-    if (!item) return;
-    pushHistory();
-    item.sourceList = item.sourceList.filter(s => s.id !== sourceId);
-    persist();
-    render();
-  }
-
-  function setTheme(theme) {
-    if (!THEMES.includes(theme)) theme = 'modern';
-    state.settings.theme = theme;
-    document.body.className = 'theme-' + theme;
-    persist();
-  }
-
-  function setMainView(view) {
-    state.settings.mainView = view === 'outline' ? 'outline' : 'board';
-    renderViewMode();
-    persist();
-  }
-
-  function toggleSidebar(forceValue) {
-    state.settings.sidebarOpen = typeof forceValue === 'boolean' ? forceValue : !state.settings.sidebarOpen;
-    renderSidebarState();
-    persist();
-  }
-
-  function toggleTopTopics(forceValue) {
-    state.settings.showTopTopics = typeof forceValue === 'boolean' ? forceValue : !state.settings.showTopTopics;
-    renderTopTopicsState();
-    persist();
-  }
-
-  function renderSidebarState() {
-    els.workspace.classList.toggle('sidebar-collapsed', !state.settings.sidebarOpen);
-  }
-
-  function renderTopTopicsState() {
-    els.topTopicsPanel.classList.toggle('hidden-panel', !state.settings.showTopTopics);
-    els.toggleTopicsBtn.textContent = state.settings.showTopTopics ? 'Hide Topics' : 'Show Topics';
-  }
-
-  function renderViewMode() {
-    const board = state.settings.mainView !== 'outline';
-    els.boardView.classList.toggle('hidden', !board);
-    els.outlineView.classList.toggle('hidden', board);
-    els.boardViewBtn.classList.toggle('primary', board);
-    els.outlineViewBtn.classList.toggle('primary', !board);
-    els.boardViewBtn.classList.toggle('soft', !board);
-    els.outlineViewBtn.classList.toggle('soft', board);
-  }
-
-  function render() {
-    normalizeState();
-    document.body.className = 'theme-' + (state.settings.theme || 'modern');
-    els.themeSelect.value = state.settings.theme || 'modern';
-    els.searchInput.value = state.ui.search || '';
-    renderSidebarState();
-    renderTopTopicsState();
-    renderViewMode();
     renderRootLane();
-    renderFocusArea();
-    renderContextTrail();
-    renderBranchDock();
     renderOutlineTree();
     renderOutlineText();
     updateButtons();
   }
 
-  function updateButtons() {
-    els.undoBtn.disabled = !state.history.past.length;
-    els.redoBtn.disabled = !state.history.future.length;
-    els.addAnswerBtn.disabled = !getActiveQuestion();
-    els.selectionPill.textContent = getSelectedItem() ? itemLabel(getSelectedItem()) : 'No selection';
+  function setExpandedNode(itemId, mode) {
+    const item = state.entities.items[itemId];
+    if (!item) return;
+    item.nodeMode = mode;
+    persist();
+    renderCanvas();
   }
 
-  function renderSideEffectsOnly() {
-    renderRootLane();
-    renderBranchDock();
-    renderOutlineTree();
-    renderOutlineText();
-    updateButtons();
-  }
+  // ── Meaningful-content helpers ────────────────────────────────────────────
 
   function filterMatchesItem(item) {
     const query = (state.ui.search || '').trim().toLowerCase();
@@ -653,14 +363,722 @@
     return item.questionIds.filter(qid => state.entities.questions[qid]).length;
   }
 
-  function countMeaningfulAnswers(question) {
-    return question.answerIds.map(id => state.entities.items[id]).filter(item => isItemMeaningful(item)).length;
+  // ── Layout engine ─────────────────────────────────────────────────────────
+
+  function estimateItemHeight(item) {
+    if (!item) return 52;
+    if (item.nodeMode === 'collapsed') return 44;
+    const srcH = item.sourceList.length * 64;
+    return 220 + srcH;
   }
+
+  function estimateQuestionHeight(question) {
+    if (!question) return 52;
+    const answerCount = Math.max(1, question.answerIds.length);
+    return 96 + answerCount * 64;
+  }
+
+  function computeLayout() {
+    const layout = new Map();
+    let rootY = 60;
+
+    state.roots.forEach(rootId => {
+      const item = state.entities.items[rootId];
+      if (!item) return;
+      const h = estimateItemHeight(item);
+      layout.set(rootId, { x: 60, y: rootY, w: NODE_W_TOPIC, h });
+      const subtreeH = layoutSubtree(rootId, 0, rootY, layout);
+      rootY += Math.max(h, subtreeH) + ROW_GAP * 2;
+    });
+
+    return layout;
+  }
+
+  function layoutSubtree(itemId, depth, startY, layout) {
+    const item = state.entities.items[itemId];
+    if (!item || !item.questionIds.length) return 0;
+
+    const parentPos = layout.get(itemId);
+    if (!parentPos) return 0;
+
+    let qY = startY;
+    let totalH = 0;
+
+    item.questionIds.forEach(questionId => {
+      const q = state.entities.questions[questionId];
+      if (!q) return;
+      const qH = estimateQuestionHeight(q);
+      const qX = parentPos.x + parentPos.w + COLUMN_WIDTH;
+      layout.set(questionId, { x: qX, y: qY, w: NODE_W_QUESTION, h: qH });
+
+      // Recurse into each answer item
+      let childY = qY;
+      q.answerIds.forEach(answerId => {
+        const answer = state.entities.items[answerId];
+        if (!answer) return;
+        layout.set(answerId, { x: qX, y: childY, w: NODE_W_QUESTION, h: 0, inline: true });
+        const subtreeH = layoutSubtree(answerId, depth + 1, childY, layout);
+        childY += subtreeH;
+      });
+
+      qY += qH + ROW_GAP;
+      totalH += qH + ROW_GAP;
+    });
+
+    return totalH;
+  }
+
+  // ── Canvas rendering ──────────────────────────────────────────────────────
+
+  function renderCanvas() {
+    if (state.settings.mainView !== 'board') return;
+    const layout = computeLayout();
+    syncCanvasNodes(layout);
+    renderConnections(layout);
+    applyTransform();
+    updateFidelityClass();
+  }
+
+  function syncCanvasNodes(layout) {
+    // Remove orphaned nodes
+    Array.from(els.canvasWorld.querySelectorAll('[data-node-id]')).forEach(el => {
+      const id = el.dataset.nodeId;
+      if (!layout.has(id)) el.remove();
+    });
+
+    // Create or update nodes
+    layout.forEach((pos, id) => {
+      if (pos.inline) return; // answer items rendered inside question nodes
+
+      const isItem = Boolean(state.entities.items[id]);
+      const isQuestion = Boolean(state.entities.questions[id]);
+      if (!isItem && !isQuestion) return;
+
+      let nodeEl = els.canvasWorld.querySelector(`[data-node-id="${id}"]`);
+      if (!nodeEl) {
+        nodeEl = document.createElement('div');
+        nodeEl.className = 'node';
+        nodeEl.dataset.nodeId = id;
+        els.canvasWorld.appendChild(nodeEl);
+      } else {
+        // Clone to shed any stale event listeners before re-rendering
+        const fresh = nodeEl.cloneNode(false);
+        nodeEl.replaceWith(fresh);
+        nodeEl = fresh;
+      }
+
+      nodeEl.style.left = pos.x + 'px';
+      nodeEl.style.top = pos.y + 'px';
+      nodeEl.style.width = pos.w + 'px';
+
+      if (isItem) {
+        renderItemNode(nodeEl, state.entities.items[id]);
+      } else {
+        renderQuestionNode(nodeEl, state.entities.questions[id]);
+      }
+    });
+  }
+
+  function renderItemNode(nodeEl, item) {
+    const isSelected = state.ui.selectedItemId === item.id;
+    const isExpanded = item.nodeMode === 'expanded';
+    const cc = colorClassForLabel('');
+
+    // Dot for abstract zoom
+    let dotColor = '#94a3b8';
+
+    const chipActive = isSelected ? 'is-active' : '';
+
+    if (!isExpanded) {
+      nodeEl.innerHTML = `
+        <div class="node-dot" style="background:${dotColor};"></div>
+        <div class="node-topic-chip ${chipActive}" data-action="expand">
+          <span>${escapeHtml(itemLabel(item))}</span>
+        </div>
+      `;
+    } else {
+      // Build spawn buttons — show which default questions already exist
+      const spawnBtns = DEFAULT_QUESTIONS.map(label => {
+        const exists = findQuestionByLabel(item.id, label);
+        const cls = colorClassForLabel(label);
+        return `<button type="button" class="spawn-btn ${cls}${exists ? ' already-exists' : ''}" data-spawn="${escapeHtml(label)}" title="${exists ? 'Already exists' : 'Add ' + label + ' branch'}">${escapeHtml(label)}</button>`;
+      }).join('');
+
+      const sourceHtml = buildSourceEditorHtml(item);
+
+      nodeEl.innerHTML = `
+        <div class="node-dot" style="background:${dotColor};"></div>
+        <div class="node-topic-card ${chipActive}">
+          <div class="node-card-header">
+            <span class="chip blank" style="font-size:0.78rem;">Topic</span>
+            <div class="node-chrome" style="display:flex;gap:6px;align-items:center;">
+              <button type="button" class="soft" style="padding:5px 10px;font-size:0.78rem;" data-action="collapse">Collapse</button>
+              <button type="button" class="soft" style="padding:5px 10px;font-size:0.78rem;" data-action="delete-item">Delete</button>
+            </div>
+          </div>
+          <div class="node-card-body">
+            <div class="node-text-area" contenteditable="true" spellcheck="true" data-item-text="${item.id}"></div>
+            <div class="node-question-buttons">
+              ${spawnBtns}
+              <button type="button" class="spawn-btn custom" data-spawn-custom="1">+ Custom</button>
+            </div>
+            <div class="inline-sources" data-source-mount="${item.id}">${sourceHtml}</div>
+            <div class="node-chrome" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="soft" style="padding:5px 10px;font-size:0.78rem;" data-action="add-source">+ Source</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const textEl = nodeEl.querySelector(`[data-item-text="${item.id}"]`);
+      setEditableContent(textEl, item.text, 'What\'s the topic?');
+      attachEditable(textEl, value => updateItemText(item.id, value), pushHistoryOnce);
+    }
+
+    nodeEl.onclick = e => handleItemNodeClick(e, item);
+    wireSourceListeners(nodeEl, item);
+  }
+
+  function renderQuestionNode(nodeEl, question) {
+    const item = state.entities.items[question.parentItemId];
+    const cc = colorClassForLabel(question.label);
+    const isActive = state.ui.activeQuestionId === question.id;
+    const activeClass = isActive ? 'is-active' : '';
+
+    // Dot color based on question type
+    const dotColors = { why: '#ef476f', what: '#118ab2', how: '#06d6a0', who: '#f4a261', custom: '#8f7cf6', blank: '#94a3b8' };
+    const dotColor = dotColors[cc] || '#94a3b8';
+
+    // Build answer bullets
+    const answersHtml = question.answerIds.map((answerId, bulletIndex) => {
+      const answer = state.entities.items[answerId];
+      if (!answer) return '';
+
+      const childSpawnBtns = DEFAULT_QUESTIONS.map(label => {
+        const exists = findQuestionByLabel(answerId, label);
+        const bcls = colorClassForLabel(label);
+        return `<button type="button" class="branch-spawn-btn ${bcls}${exists ? ' already-exists' : ''}" data-child-spawn="${escapeHtml(label)}" data-answer-id="${answerId}" title="${exists ? 'Already exists' : 'Branch ' + label}">${escapeHtml(label)} →</button>`;
+      }).join('');
+
+      return `
+        <div class="answer-bullet" data-bullet-index="${bulletIndex}">
+          <div class="answer-bullet-row">
+            <div class="bullet-marker"></div>
+            <div class="answer-text-field" contenteditable="true" spellcheck="true" data-item-text="${answer.id}"></div>
+          </div>
+          <div class="answer-bullet-actions node-chrome">
+            ${childSpawnBtns}
+            <button type="button" class="branch-spawn-btn custom" data-child-spawn-custom="1" data-answer-id="${answerId}">Custom →</button>
+            <button type="button" class="branch-spawn-btn" style="color:var(--muted);" data-delete-answer="${answerId}">✕</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Offer split button if single answer with newlines
+    const singleAnswer = question.answerIds.length === 1 ? state.entities.items[question.answerIds[0]] : null;
+    const canSplit = singleAnswer && (singleAnswer.text || '').includes('\n') && singleAnswer.text.split('\n').filter(l => l.trim()).length > 1;
+
+    nodeEl.innerHTML = `
+      <div class="node-dot" style="background:${dotColor};"></div>
+      <div class="node-question-card ${activeClass}">
+        <div class="node-q-header">
+          <div class="node-q-label" contenteditable="true" spellcheck="false" data-question-label="${question.id}"></div>
+          <div class="node-chrome" style="display:flex;gap:4px;flex-shrink:0;">
+            <button type="button" class="soft" style="padding:4px 8px;font-size:0.75rem;" data-action="delete-question">✕</button>
+          </div>
+        </div>
+        <div class="node-q-body">
+          ${answersHtml || '<div class="branch-empty" style="font-size:0.84rem;">No answers yet.</div>'}
+        </div>
+        <div class="node-q-footer node-chrome">
+          <button type="button" class="soft" style="padding:5px 10px;font-size:0.78rem;" data-action="add-answer">+ Answer</button>
+          ${canSplit ? `<button type="button" class="soft split-btn" data-action="split-bullets">Split into bullets</button>` : ''}
+        </div>
+      </div>
+    `;
+
+    // Wire question label editable
+    const labelEl = nodeEl.querySelector(`[data-question-label="${question.id}"]`);
+    if (labelEl) {
+      setEditableContent(labelEl, question.label, 'Question…');
+      attachEditable(labelEl, value => updateQuestionLabel(question.id, value), pushHistoryOnce);
+    }
+
+    // Wire answer text editables
+    question.answerIds.forEach(answerId => {
+      const answer = state.entities.items[answerId];
+      if (!answer) return;
+      const textEl = nodeEl.querySelector(`[data-item-text="${answer.id}"]`);
+      if (textEl) {
+        setEditableContent(textEl, answer.text, 'Write an answer…');
+        attachEditable(textEl, value => updateItemText(answerId, value), pushHistoryOnce);
+      }
+    });
+
+    nodeEl.onclick = e => handleQuestionNodeClick(e, question);
+  }
+
+  function handleItemNodeClick(e, item) {
+    const action = e.target.closest('[data-action]')?.dataset?.action;
+    const spawnLabel = e.target.closest('[data-spawn]')?.dataset?.spawn;
+    const spawnCustom = e.target.closest('[data-spawn-custom]');
+
+    if (action === 'collapse') {
+      e.stopPropagation();
+      setExpandedNode(item.id, 'collapsed');
+      return;
+    }
+    if (action === 'delete-item') {
+      e.stopPropagation();
+      deleteItem(item.id);
+      return;
+    }
+    if (action === 'add-source') {
+      e.stopPropagation();
+      addSource(item.id);
+      return;
+    }
+    if (spawnLabel) {
+      e.stopPropagation();
+      spawnQuestion(item.id, spawnLabel);
+      return;
+    }
+    if (spawnCustom) {
+      e.stopPropagation();
+      addCustomQuestion(item.id, '');
+      return;
+    }
+    if (e.target.closest('[data-action="delete-source"]')) {
+      e.stopPropagation();
+      const sourceId = e.target.closest('[data-source-id]')?.dataset?.sourceId;
+      if (sourceId) deleteSource(item.id, sourceId);
+      return;
+    }
+    // Click on chip or card background expands
+    if (!e.target.closest('[contenteditable], input, button')) {
+      setFocusedNode(item.id);
+      if (item.nodeMode !== 'expanded') {
+        setExpandedNode(item.id, 'expanded');
+      }
+    }
+  }
+
+  function handleQuestionNodeClick(e, question) {
+    const action = e.target.closest('[data-action]')?.dataset?.action;
+    const childSpawnLabel = e.target.closest('[data-child-spawn]')?.dataset?.childSpawn;
+    const childSpawnCustom = e.target.closest('[data-child-spawn-custom]');
+    const deleteAnswerId = e.target.closest('[data-delete-answer]')?.dataset?.deleteAnswer;
+
+    if (action === 'delete-question') {
+      e.stopPropagation();
+      deleteQuestion(question.id);
+      return;
+    }
+    if (action === 'add-answer') {
+      e.stopPropagation();
+      addAnswerToQuestion(question.id);
+      return;
+    }
+    if (action === 'split-bullets') {
+      e.stopPropagation();
+      splitAnswerIntoBullets(question.id);
+      return;
+    }
+    if (childSpawnLabel) {
+      e.stopPropagation();
+      const answerId = e.target.closest('[data-answer-id]')?.dataset?.answerId;
+      if (answerId) spawnQuestion(answerId, childSpawnLabel);
+      return;
+    }
+    if (childSpawnCustom) {
+      e.stopPropagation();
+      const answerId = e.target.closest('[data-answer-id]')?.dataset?.answerId;
+      if (answerId) addCustomQuestion(answerId, '');
+      return;
+    }
+    if (deleteAnswerId) {
+      e.stopPropagation();
+      deleteItem(deleteAnswerId);
+      return;
+    }
+
+    // Clicking the card activates this question
+    if (!e.target.closest('[contenteditable], input, button')) {
+      state.ui.activeQuestionId = question.id;
+      setFocusedNode(question.parentItemId);
+      persist();
+      renderCanvas();
+    }
+  }
+
+  // ── SVG connection lines ──────────────────────────────────────────────────
+
+  function renderConnections(layout) {
+    els.connectionLayer.innerHTML = '';
+
+    // Draw one bezier per question: parent item pos → question node pos
+    Object.values(state.entities.questions).forEach(question => {
+      const parentPos = layout.get(question.parentItemId);
+      const qPos = layout.get(question.id);
+      if (!parentPos || !qPos) return;
+
+      const x1 = parentPos.x + parentPos.w;
+      const y1 = parentPos.y + 44;
+      const x2 = qPos.x;
+      const y2 = qPos.y + 44;
+      const mx = Math.max(40, (x2 - x1) * 0.5);
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${x1},${y1} C ${x1 + mx},${y1} ${x2 - mx},${y2} ${x2},${y2}`);
+      path.setAttribute('class', `connection-path ${colorClassForLabel(question.label)}`);
+      els.connectionLayer.appendChild(path);
+    });
+  }
+
+  // ── Pan / zoom ────────────────────────────────────────────────────────────
+
+  function applyTransform() {
+    const { panX, panY, scale } = state.ui.canvas;
+    const t = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    els.canvasWorld.style.transform = t;
+    els.connectionLayer.style.transform = t;
+    els.connectionLayer.style.transformOrigin = '0 0';
+  }
+
+  function updateFidelityClass() {
+    const scale = state.ui.canvas.scale;
+    els.canvasWorld.classList.remove('fidelity-full', 'fidelity-medium', 'fidelity-abstract');
+    if (scale >= 0.6) els.canvasWorld.classList.add('fidelity-full');
+    else if (scale >= 0.3) els.canvasWorld.classList.add('fidelity-medium');
+    else els.canvasWorld.classList.add('fidelity-abstract');
+  }
+
+  function setCanvasTransform(panX, panY, scale) {
+    state.ui.canvas.panX = panX;
+    state.ui.canvas.panY = panY;
+    state.ui.canvas.scale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale));
+    applyTransform();
+    updateFidelityClass();
+    persist();
+  }
+
+  function handleWheel(e) {
+    e.preventDefault();
+    const rect = els.boardView.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.909;
+    const { panX, panY, scale } = state.ui.canvas;
+    const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale * zoomFactor));
+    const actualFactor = newScale / scale;
+    setCanvasTransform(
+      mouseX - (mouseX - panX) * actualFactor,
+      mouseY - (mouseY - panY) * actualFactor,
+      newScale
+    );
+  }
+
+  function initPanEvents() {
+    els.boardView.addEventListener('wheel', handleWheel, { passive: false });
+
+    els.boardView.addEventListener('mousedown', e => {
+      if (e.target.closest('[data-node-id], button, [contenteditable], input, select')) return;
+      isPanning = true;
+      panStart = { x: e.clientX - state.ui.canvas.panX, y: e.clientY - state.ui.canvas.panY };
+      els.boardView.classList.add('is-panning');
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (!isPanning) return;
+      const newPanX = e.clientX - panStart.x;
+      const newPanY = e.clientY - panStart.y;
+      state.ui.canvas.panX = newPanX;
+      state.ui.canvas.panY = newPanY;
+      applyTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!isPanning) return;
+      isPanning = false;
+      els.boardView.classList.remove('is-panning');
+      persist();
+    });
+  }
+
+  function zoomToNode(nodeId) {
+    const layout = computeLayout();
+    const pos = layout.get(nodeId);
+    if (!pos) return;
+    const vw = els.boardView.offsetWidth;
+    const vh = els.boardView.offsetHeight;
+    const targetScale = 1.0;
+    const panX = vw / 2 - (pos.x + pos.w / 2) * targetScale;
+    const panY = vh / 2 - (pos.y + pos.h / 2) * targetScale;
+    setCanvasTransform(panX, panY, targetScale);
+    renderCanvas();
+  }
+
+  // ── Node mutation helpers ─────────────────────────────────────────────────
+
+  function addRoot() {
+    pushHistory();
+    const item = createItemInternal(state, { kind: 'topic', text: '' });
+    item.nodeMode = 'expanded';
+    state.roots.push(item.id);
+    state.ui.selectedItemId = item.id;
+    persist();
+    render();
+    requestAnimationFrame(() => focusEditable(`[data-item-text="${item.id}"]`));
+  }
+
+  function spawnQuestion(parentItemId, label) {
+    const item = state.entities.items[parentItemId];
+    if (!item) return;
+    const existing = findQuestionByLabel(parentItemId, label);
+    if (existing) {
+      state.ui.activeQuestionId = existing.id;
+      persist();
+      renderCanvas();
+      return;
+    }
+    pushHistory();
+    const q = createQuestionInternal(state, parentItemId, label);
+    // Add a first blank answer item
+    createItemInternal(state, { kind: 'answer', text: '', parentQuestionId: q.id });
+    state.ui.activeQuestionId = q.id;
+    persist();
+    render();
+    requestAnimationFrame(() => {
+      const answerEl = document.querySelector(`[data-node-id="${q.id}"] [data-item-text]`);
+      if (answerEl) { answerEl.focus(); }
+    });
+  }
+
+  function addCustomQuestion(parentItemId, label) {
+    const item = state.entities.items[parentItemId];
+    if (!item) return;
+    if (!label) {
+      openModal({
+        title: 'New Custom Question',
+        subtitle: 'Name this custom question branch.',
+        initialValue: 'Custom',
+        actions: [
+          { label: 'Add', primary: true, onClick: value => {
+            closeModal();
+            _commitAddCustomQuestion(parentItemId, (value || '').trim() || 'Custom');
+          }},
+          { label: 'Cancel', onClick: closeModal },
+        ],
+      });
+      return;
+    }
+    _commitAddCustomQuestion(parentItemId, (label || '').trim() || 'Custom');
+  }
+
+  function _commitAddCustomQuestion(parentItemId, chosen) {
+    pushHistory();
+    const q = createQuestionInternal(state, parentItemId, chosen);
+    createItemInternal(state, { kind: 'answer', text: '', parentQuestionId: q.id });
+    state.ui.activeQuestionId = q.id;
+    persist();
+    render();
+  }
+
+  function addAnswerToQuestion(questionId) {
+    const q = state.entities.questions[questionId];
+    if (!q) return;
+    pushHistory();
+    const item = createItemInternal(state, { kind: 'answer', text: '', parentQuestionId: questionId });
+    state.ui.activeQuestionId = questionId;
+    persist();
+    renderCanvas();
+    requestAnimationFrame(() => focusEditable(`[data-node-id="${questionId}"] [data-item-text="${item.id}"]`));
+  }
+
+  function splitAnswerIntoBullets(questionId) {
+    const q = state.entities.questions[questionId];
+    if (!q || q.answerIds.length !== 1) return;
+    const source = state.entities.items[q.answerIds[0]];
+    if (!source) return;
+    const lines = (source.text || '').split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return;
+    pushHistory();
+    // Remove the original answer
+    deleteItemRecursive(source.id);
+    q.answerIds = q.answerIds.filter(id => id !== source.id);
+    // Create one item per line
+    lines.forEach(line => {
+      createItemInternal(state, { kind: 'answer', text: line, parentQuestionId: questionId });
+    });
+    persist();
+    render();
+  }
+
+  function focusEditable(selector) {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function updateItemText(itemId, text) {
+    const item = state.entities.items[itemId];
+    if (!item) return;
+    item.text = text;
+    item.updatedAt = Date.now();
+    persist();
+    renderRootLane();
+    renderOutlineTree();
+    renderOutlineText();
+    updateButtons();
+  }
+
+  function updateQuestionLabel(questionId, label) {
+    const q = state.entities.questions[questionId];
+    if (!q) return;
+    q.label = label;
+    q.updatedAt = Date.now();
+    persist();
+    renderOutlineTree();
+    renderOutlineText();
+    renderConnections(computeLayout());
+  }
+
+  function deleteQuestion(questionId) {
+    const q = state.entities.questions[questionId];
+    if (!q) return;
+    openConfirm(
+      'Delete Question Branch',
+      'This will delete the question and all nested answers beneath it.',
+      () => {
+        pushHistory();
+        const parentItemId = q.parentItemId;
+        deleteQuestionRecursive(questionId);
+        const parentItem = state.entities.items[parentItemId];
+        if (parentItem) {
+          parentItem.questionIds = parentItem.questionIds.filter(id => id !== questionId);
+        }
+        if (state.ui.activeQuestionId === questionId) state.ui.activeQuestionId = null;
+        persist();
+        render();
+      }
+    );
+  }
+
+  function deleteQuestionRecursive(questionId) {
+    const q = state.entities.questions[questionId];
+    if (!q) return;
+    q.answerIds.slice().forEach(answerId => deleteItemRecursive(answerId));
+    delete state.entities.questions[questionId];
+  }
+
+  function deleteItemRecursive(itemId) {
+    const item = state.entities.items[itemId];
+    if (!item) return;
+    item.questionIds.slice().forEach(questionId => deleteQuestionRecursive(questionId));
+    if (item.parentQuestionId) {
+      const pq = state.entities.questions[item.parentQuestionId];
+      if (pq) pq.answerIds = pq.answerIds.filter(id => id !== itemId);
+    }
+    state.roots = state.roots.filter(id => id !== itemId);
+    if (state.ui.selectedItemId === itemId) {
+      state.ui.selectedItemId = state.roots[0] || null;
+      state.ui.activeQuestionId = null;
+    }
+    delete state.entities.items[itemId];
+  }
+
+  function deleteItem(itemId) {
+    const item = state.entities.items[itemId];
+    if (!item) return;
+    openConfirm(
+      'Delete Card',
+      'This will delete the card and all nested branches beneath it.',
+      () => {
+        pushHistory();
+        deleteItemRecursive(itemId);
+        normalizeState();
+        persist();
+        render();
+      }
+    );
+  }
+
+  function addSource(itemId) {
+    const item = state.entities.items[itemId];
+    if (!item) return;
+    pushHistory();
+    item.sourceList.push({ id: uid('src'), label: '', url: '', note: '' });
+    persist();
+    renderCanvas();
+  }
+
+  function updateSource(itemId, sourceId, key, value) {
+    const item = state.entities.items[itemId];
+    if (!item) return;
+    const source = item.sourceList.find(s => s.id === sourceId);
+    if (!source) return;
+    source[key] = value;
+    item.updatedAt = Date.now();
+    persist();
+  }
+
+  function deleteSource(itemId, sourceId) {
+    const item = state.entities.items[itemId];
+    if (!item) return;
+    pushHistory();
+    item.sourceList = item.sourceList.filter(s => s.id !== sourceId);
+    persist();
+    renderCanvas();
+  }
+
+  // ── Source editor HTML builder ────────────────────────────────────────────
+
+  function buildSourceEditorHtml(item) {
+    if (!item.sourceList.length) return '';
+    return item.sourceList.map(src => {
+      const safeUrl = /^https?:\/\//i.test(src.url || '') ? src.url : null;
+      return `
+        <div class="source-grid" data-source-id="${src.id}">
+          <div class="source-row">
+            <input type="text" data-key="label" value="${escapeAttr(src.label || '')}" placeholder="Source label" />
+            <input type="url" data-key="url" value="${escapeAttr(src.url || '')}" placeholder="https://…" />
+            <input type="text" data-key="note" class="source-note" value="${escapeAttr(src.note || '')}" placeholder="Optional note" />
+          </div>
+          <div class="sort-row">
+            <div class="sort-left">
+              ${safeUrl ? `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener noreferrer" class="pill">Open ↗</a>` : ''}
+            </div>
+            <div class="sort-right">
+              <button type="button" class="soft" data-action="delete-source" style="padding:5px 10px;font-size:0.78rem;">Delete</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function wireSourceListeners(nodeEl, item) {
+    const mount = nodeEl.querySelector(`[data-source-mount="${item.id}"]`);
+    if (!mount) return;
+    mount.querySelectorAll('input').forEach(input => {
+      input.addEventListener('focus', pushHistoryOnce);
+      input.addEventListener('input', e => updateSource(item.id, input.closest('[data-source-id]')?.dataset?.sourceId, e.target.dataset.key, e.target.value));
+    });
+  }
+
+  // ── Root lane (topic strip) ───────────────────────────────────────────────
 
   function renderRootLane() {
     els.rootLane.innerHTML = '';
     if (!state.roots.length) {
-      els.rootLane.innerHTML = '<div class="empty-state">No topics yet. Click <strong>New Topic</strong> to start your board.</div>';
+      els.rootLane.innerHTML = '<div class="empty-state">No topics yet. Click <strong>+ New Topic</strong> to start.</div>';
       return;
     }
     let visibleCount = 0;
@@ -684,11 +1102,12 @@
           </div>
           <small>#${index + 1}</small>
         </div>
-        <small>${liveQuestions} live question branch${liveQuestions === 1 ? '' : 'es'} • ${branchCount} populated descendant${branchCount === 1 ? '' : 's'}</small>
+        <small>${liveQuestions} question branch${liveQuestions === 1 ? '' : 'es'} • ${branchCount} populated descendant${branchCount === 1 ? '' : 's'}</small>
       `;
       card.addEventListener('click', e => {
         if (e.target.closest('[data-item-text]')) return;
-        selectItem(itemId);
+        setFocusedNode(itemId);
+        zoomToNode(itemId);
       });
       wireDragAndDrop(card, state.roots, itemId, () => render());
       els.rootLane.appendChild(card);
@@ -697,19 +1116,12 @@
       setEditableContent(labelEl, item.text, 'Untitled topic');
       labelEl.addEventListener('mousedown', e => e.stopPropagation());
       labelEl.addEventListener('focus', () => {
-        pushHistory();
+        pushHistoryOnce();
         if (state.ui.selectedItemId !== itemId) {
           state.ui.selectedItemId = itemId;
-          state.ui.activeQuestionId = findFirstMeaningfulQuestionId(state.entities.items[itemId]) || null;
           document.querySelectorAll('.root-chip').forEach(c =>
             c.classList.toggle('active', c.dataset.id === itemId)
           );
-          renderFocusArea();
-          renderContextTrail();
-          renderBranchDock();
-          renderOutlineTree();
-          renderOutlineText();
-          updateButtons();
           persist();
         }
         if (labelEl.dataset.empty === 'true') labelEl.textContent = '';
@@ -717,9 +1129,7 @@
       labelEl.addEventListener('keydown', e => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') labelEl.blur();
       });
-      labelEl.addEventListener('blur', () => {
-        updateItemText(itemId, getEditableText(labelEl));
-      });
+      labelEl.addEventListener('blur', () => updateItemText(itemId, getEditableText(labelEl)));
       labelEl.addEventListener('input', () => toggleEditablePlaceholder(labelEl));
     });
     if (!visibleCount) {
@@ -727,317 +1137,7 @@
     }
   }
 
-  function renderFocusArea() {
-    const item = getSelectedItem();
-    els.focusCardMount.innerHTML = '';
-    els.orbit.innerHTML = '';
-    if (!item) {
-      els.focusCardMount.innerHTML = '<div class="empty-state">Select a topic or create a new one to begin.</div>';
-      return;
-    }
-
-    const card = document.createElement('div');
-    card.className = 'item-card focus-card';
-    card.innerHTML = `
-      <div class="item-meta">
-        ${navStack.length ? '<button type="button" class="soft" data-action="nav-back">← Back</button>' : ''}
-        <span class="pill">${item.kind === 'topic' ? 'Topic' : 'Answer'}</span>
-        <span class="muted">${item.parentQuestionId ? escapeHtml(state.entities.questions[item.parentQuestionId]?.label || 'question') + ' branch' : 'Top level'}</span>
-      </div>
-      <div class="item-text" data-item-text="${item.id}" contenteditable="true" spellcheck="true"></div>
-      <div class="mini-toolbar">
-        <button type="button" class="soft" data-action="add-source">+ Source</button>
-        <button type="button" class="soft" data-action="add-question">+ Question</button>
-        <button type="button" class="soft" data-action="duplicate-root">Duplicate</button>
-        <button type="button" class="soft" data-action="delete-item">Delete</button>
-      </div>
-      <div class="inline-sources" data-source-mount="${item.id}"></div>
-    `;
-    els.focusCardMount.appendChild(card);
-
-    const editable = card.querySelector(`[data-item-text="${item.id}"]`);
-    setEditableContent(editable, item.text, item.kind === 'topic' ? 'What\'s the topic for today?' : 'Add an answer or subtopic…');
-    attachEditable(editable, value => updateItemText(item.id, value), pushHistoryOnce);
-    renderSourceEditor(card.querySelector(`[data-source-mount="${item.id}"]`), item, 'card');
-
-    card.addEventListener('click', (event) => {
-      const action = event.target?.dataset?.action;
-      if (!action) return;
-      if (action === 'nav-back') { navigateBack(); return; }
-      if (action === 'add-question') addCustomQuestion(item.id, '');
-      if (action === 'add-source') addSource(item.id);
-      if (action === 'duplicate-root') {
-        pushHistory();
-        const dup = cloneSubtreeAsRoot(item.id);
-        state.roots.push(dup.id);
-        state.ui.selectedItemId = dup.id;
-        state.ui.activeQuestionId = findFirstMeaningfulQuestionId(dup) || null;
-        persist();
-        render();
-      }
-      if (action === 'delete-item') deleteItem(item.id);
-    });
-
-    renderOrbit(item);
-  }
-
-  function cloneSubtreeAsRoot(itemId) {
-    const original = state.entities.items[itemId];
-    const clone = createItemInternal(state, { kind: 'topic', text: original.text });
-    clone.sourceList = deepClone(original.sourceList || []);
-    original.questionIds.forEach(origQId => {
-      const origQ = state.entities.questions[origQId];
-      if (!origQ) return;
-      const newQ = createQuestionInternal(state, clone.id, origQ.label);
-      origQ.answerIds.forEach(origAnswerId => cloneAnswerBranch(origAnswerId, newQ.id));
-    });
-    return clone;
-  }
-
-  function cloneAnswerBranch(itemId, parentQuestionId) {
-    const original = state.entities.items[itemId];
-    const clone = createItemInternal(state, { kind: original.kind, text: original.text, parentQuestionId });
-    clone.sourceList = deepClone(original.sourceList || []);
-    original.questionIds.forEach(origQId => {
-      const origQ = state.entities.questions[origQId];
-      if (!origQ) return;
-      const newQ = createQuestionInternal(state, clone.id, origQ.label);
-      origQ.answerIds.forEach(origAnswerId => cloneAnswerBranch(origAnswerId, newQ.id));
-    });
-    return clone;
-  }
-
-  function buildOrbitEntries(item) {
-    const entries = DEFAULT_QUESTIONS.map(label => {
-      const existing = findQuestionByLabel(item.id, label);
-      return {
-        kind: existing ? 'question' : 'default',
-        label,
-        questionId: existing?.id || null,
-        count: existing ? countMeaningfulAnswers(existing) : 0,
-        ghost: !existing,
-      };
-    });
-
-    const customQuestions = item.questionIds
-      .map(id => state.entities.questions[id])
-      .filter(q => q && !isDefaultQuestionLabel(q.label));
-
-    customQuestions.forEach(q => {
-      entries.push({
-        kind: 'question',
-        label: q.label || 'Custom',
-        questionId: q.id,
-        count: countMeaningfulAnswers(q),
-        ghost: false,
-      });
-    });
-
-    entries.push({
-      kind: 'custom-add',
-      label: '+ Custom',
-      questionId: null,
-      count: customQuestions.length,
-      ghost: false,
-    });
-
-    return entries;
-  }
-
-  function renderOrbit(item) {
-    els.orbit.innerHTML = '';
-    const entries = buildOrbitEntries(item);
-    if (!entries.length) return;
-    const stage = els.canvasZone;
-    const stageRect = stage.getBoundingClientRect();
-    const cardRect = els.focusCardWrap.getBoundingClientRect();
-    const centerX = cardRect.right - stageRect.left + 18;
-    const centerY = cardRect.top - stageRect.top + cardRect.height / 2;
-    const radiusX = Math.min(250, Math.max(155, stageRect.width - cardRect.width - 100));
-    const radiusY = Math.min(200, Math.max(120, stageRect.height / 2 - 40));
-    const startAngle = -72;
-    const endAngle = 72;
-
-    entries.forEach((entry, index) => {
-      const angle = entries.length === 1 ? 0 : startAngle + ((endAngle - startAngle) * index / (entries.length - 1));
-      const rad = angle * Math.PI / 180;
-      const x = centerX + Math.cos(rad) * radiusX;
-      const y = centerY + Math.sin(rad) * radiusY;
-      const cc = entry.kind === 'custom-add' ? 'custom' : colorClassForLabel(entry.label);
-      const bubble = document.createElement('div');
-      bubble.className = `orbit-bubble bubble-${cc} ${entry.ghost ? 'ghost' : ''} ${state.ui.activeQuestionId === entry.questionId ? 'active' : ''}`;
-      bubble.style.left = `${x}px`;
-      bubble.style.top = `${y}px`;
-      bubble.style.transform = 'translate(-40%, -50%)';
-      bubble.innerHTML = `<span>${escapeHtml((entry.label || '').trim() || 'Blank')}</span><small>${entry.count}</small>`;
-      bubble.addEventListener('click', () => {
-        if (entry.kind === 'default') {
-          activateDefaultQuestion(item.id, entry.label);
-          return;
-        }
-        if (entry.kind === 'custom-add') {
-          addCustomQuestion(item.id, '');
-          return;
-        }
-        state.ui.activeQuestionId = entry.questionId;
-        persist();
-        renderBranchDock();
-        renderOrbit(item);
-        renderOutlineTree();
-        renderOutlineText();
-        updateButtons();
-      });
-      els.orbit.appendChild(bubble);
-    });
-  }
-
-  function renderBranchDock() {
-    const item = getSelectedItem();
-    const q = getActiveQuestion();
-    els.branchDock.innerHTML = '';
-    if (!item) {
-      els.branchDock.innerHTML = '<div class="empty-state">Select a topic to edit its strategy branches.</div>';
-      return;
-    }
-
-    if (!q) {
-      els.branchDock.innerHTML = '';
-      return;
-    }
-
-    const wrap = document.createElement('div');
-    wrap.className = 'panel';
-    wrap.innerHTML = `
-      <div class="panel-body">
-        <div class="branch-header">
-          <div class="branch-title-group">
-            <span class="chip ${colorClassForLabel(q.label)} active">${escapeHtml(q.label || 'Blank')}</span>
-            ${isDefaultQuestionLabel(q.label) ? '<span class="pill">Default branch</span>' : `<div class="branch-label-edit" contenteditable="true" data-question-label="${q.id}"></div>`}
-          </div>
-          <div class="branch-actions">
-            <button type="button" class="soft" data-action="add-answer">+ Answer</button>
-            <button type="button" class="soft" data-action="delete-question">Delete Branch</button>
-          </div>
-        </div>
-        <div class="status">
-          <span class="pill">${q.answerIds.length} answer${q.answerIds.length === 1 ? '' : 's'}</span>
-          <span class="pill">Drag to reorder</span>
-          <span class="pill">Click → or card body to drill in</span>
-        </div>
-        <div class="answer-list"></div>
-      </div>
-    `;
-    els.branchDock.appendChild(wrap);
-
-    const branchLabel = wrap.querySelector(`[data-question-label="${q.id}"]`);
-    if (branchLabel) {
-      setEditableContent(branchLabel, q.label, 'Custom question');
-      attachEditable(branchLabel, value => updateQuestionLabel(q.id, value), pushHistoryOnce);
-    }
-
-    wrap.addEventListener('click', event => {
-      const action = event.target?.dataset?.action;
-      if (!action) return;
-      if (action === 'add-answer') addAnswer(q.id);
-      if (action === 'delete-question') deleteQuestion(q.id);
-    });
-
-    renderAnswerList(wrap.querySelector('.answer-list'), q);
-  }
-
-  function buildChildQuestionSummary(item) {
-    return buildOrbitEntries(item)
-      .filter(entry => entry.kind !== 'custom-add')
-      .map(entry => `<span class="chip ${colorClassForLabel(entry.label)}">${escapeHtml(entry.label)} <small>${entry.count}</small></span>`)
-      .join('');
-  }
-
-  function renderAnswerList(container, question) {
-    container.innerHTML = '';
-    if (!question.answerIds.length) {
-      container.innerHTML = '<div class="branch-empty">No answers yet. Add one, type into it, and this branch will start showing up in the tree and exports.</div>';
-      return;
-    }
-    question.answerIds.forEach(answerId => {
-      const item = state.entities.items[answerId];
-      if (!item) return;
-      const sourceCount = item.sourceList.length;
-      const card = document.createElement('div');
-      card.className = 'answer-card sortable-item';
-      card.draggable = true;
-      card.dataset.dragType = 'answers:' + question.id;
-      card.dataset.id = answerId;
-      card.innerHTML = `
-        <div class="sort-row">
-          <div class="sort-left">
-            <div class="drag">⋮⋮</div>
-            <span class="pill">${sourceCount} source${sourceCount === 1 ? '' : 's'}</span>
-            <span class="pill">${countInstantiatedQuestions(item)} question branch${countInstantiatedQuestions(item) === 1 ? '' : 'es'}</span>
-          </div>
-          <div class="sort-right">
-            <button type="button" class="soft" data-action="add-source">+ Source</button>
-            <button type="button" class="soft" data-action="delete-item">Delete</button>
-            <button type="button" class="drill-in-btn" data-action="drill-in" title="Explore this answer">→</button>
-          </div>
-        </div>
-        <div class="answer-text" contenteditable="true" data-item-text="${item.id}"></div>
-        <div class="mini-toolbar">${buildChildQuestionSummary(item)}</div>
-        <div class="inline-sources" data-source-mount="${item.id}"></div>
-      `;
-      wireDragAndDrop(card, question.answerIds, answerId, () => render());
-      const answerText = card.querySelector(`[data-item-text="${item.id}"]`);
-      setEditableContent(answerText, item.text, 'Add an answer or subtopic…');
-      attachEditable(answerText, value => updateItemText(item.id, value), pushHistoryOnce);
-      renderSourceEditor(card.querySelector(`[data-source-mount="${item.id}"]`), item, 'answer');
-      card.addEventListener('click', event => {
-        const action = event.target?.dataset?.action;
-        if (action === 'drill-in') { drillInto(item.id); return; }
-        if (action === 'add-source') { addSource(item.id); return; }
-        if (action === 'delete-item') { deleteItem(item.id); return; }
-        if (!event.target.closest('[contenteditable], input, button, a, [data-source-mount]')) {
-          drillInto(item.id);
-        }
-      });
-      container.appendChild(card);
-    });
-  }
-
-  function renderSourceEditor(container, item, mode) {
-    if (!container) return;
-    container.innerHTML = '';
-    if (!item.sourceList.length) {
-      if (mode === 'card') {
-        container.innerHTML = '<div class="panel-subtitle">No sources on this card yet.</div>';
-      }
-      return;
-    }
-    item.sourceList.forEach(src => {
-      const safeUrl = /^https?:\/\//i.test(src.url || '') ? src.url : null;
-      const row = document.createElement('div');
-      row.className = 'source-grid';
-      row.innerHTML = `
-        <div class="source-row">
-          <input type="text" data-key="label" value="${escapeAttr(src.label || '')}" placeholder="Source label" />
-          <input type="url" data-key="url" value="${escapeAttr(src.url || '')}" placeholder="https://…" />
-          <input type="text" data-key="note" class="source-note" value="${escapeAttr(src.note || '')}" placeholder="Optional note or citation context" />
-        </div>
-        <div class="sort-row">
-          <div class="sort-left">
-            ${safeUrl ? `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener noreferrer" class="pill">Open ↗</a>` : ''}
-          </div>
-          <div class="sort-right">
-            <button type="button" class="soft" data-action="delete-source">Delete</button>
-          </div>
-        </div>
-      `;
-      row.querySelectorAll('input').forEach(input => {
-        input.addEventListener('focus', pushHistoryOnce);
-        input.addEventListener('input', e => updateSource(item.id, src.id, e.target.dataset.key, e.target.value));
-      });
-      row.querySelector('[data-action="delete-source"]').addEventListener('click', () => deleteSource(item.id, src.id));
-      container.appendChild(row);
-    });
-  }
+  // ── Outline tree ──────────────────────────────────────────────────────────
 
   function renderOutlineTree() {
     els.outlineTree.innerHTML = '';
@@ -1068,7 +1168,10 @@
       <span class="pill">${item.kind}</span>
       ${item.parentQuestionId ? `<span class="pill">via ${escapeHtml(state.entities.questions[item.parentQuestionId]?.label || 'question')}</span>` : '<span class="pill">top-level</span>'}
     `;
-    row.querySelector('.outline-select').addEventListener('click', () => selectItem(item.id));
+    row.querySelector('.outline-select').addEventListener('click', () => {
+      setFocusedNode(item.id);
+      zoomToNode(item.id);
+    });
     wrapper.appendChild(row);
 
     meaningfulQuestionsForItem(item).forEach(q => {
@@ -1082,7 +1185,12 @@
           <span class="pill">${meaningfulAnswersForQuestion(q).length}</span>
         </div>
       `;
-      qNode.querySelector('.outline-select').addEventListener('click', () => selectItem(item.id, q.id));
+      qNode.querySelector('.outline-select').addEventListener('click', () => {
+        state.ui.activeQuestionId = q.id;
+        setFocusedNode(item.id);
+        zoomToNode(q.id);
+        persist();
+      });
       meaningfulAnswersForQuestion(q).forEach(answer => {
         qNode.appendChild(renderOutlineItem(answer));
       });
@@ -1096,6 +1204,8 @@
     els.outlineText.textContent = text;
     els.outlineViewText.textContent = text;
   }
+
+  // ── Outline text generation ───────────────────────────────────────────────
 
   function generateBreadthThenDrillOutline() {
     const roots = state.roots
@@ -1169,63 +1279,97 @@
     return String(text || '').replace(/\s+/g, ' ').trim() || '[blank]';
   }
 
-  function wireDragAndDrop(element, arrayRef, itemId, onDone) {
-    element.addEventListener('dragstart', event => {
-      dragState = { dragType: element.dataset.dragType, itemId, arrayRef };
-      event.dataTransfer.effectAllowed = 'move';
-      element.classList.add('dragging');
-    });
-    element.addEventListener('dragend', () => {
-      dragState = null;
-      element.classList.remove('dragging');
-    });
-    element.addEventListener('dragover', event => {
-      if (!dragState) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-    });
-    element.addEventListener('drop', event => {
-      if (!dragState) return;
-      event.preventDefault();
-      const sameGroup = dragState.arrayRef === arrayRef || element.dataset.dragType === dragState.dragType;
-      if (!sameGroup) return;
-      const from = arrayRef.indexOf(dragState.itemId);
-      const to = arrayRef.indexOf(itemId);
-      if (from === -1 || to === -1 || from === to) return;
-      pushHistory();
-      arrayRef.splice(to, 0, arrayRef.splice(from, 1)[0]);
-      persist();
-      onDone?.();
-    });
+  // ── View / theme state ────────────────────────────────────────────────────
+
+  function setTheme(theme) {
+    if (!THEMES.includes(theme)) theme = 'modern';
+    state.settings.theme = theme;
+    document.body.className = 'theme-' + theme;
+    persist();
   }
 
-  function attachEditable(element, onCommit, onBeforeEdit) {
-    element.addEventListener('focus', () => {
-      onBeforeEdit?.();
-      const placeholder = element.dataset.placeholder || '';
-      if (element.textContent === placeholder && element.dataset.empty === 'true') {
-        element.textContent = '';
-      }
-    });
-    element.addEventListener('keydown', event => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-        element.blur();
-      }
-    });
-    element.addEventListener('blur', () => {
-      const value = getEditableText(element);
-      onCommit(value);
-    });
-    element.addEventListener('input', () => {
-      toggleEditablePlaceholder(element);
-    });
+  function setMainView(view) {
+    state.settings.mainView = view === 'outline' ? 'outline' : 'board';
+    renderViewMode();
+    persist();
   }
+
+  function toggleSidebar(forceValue) {
+    state.settings.sidebarOpen = typeof forceValue === 'boolean' ? forceValue : !state.settings.sidebarOpen;
+    renderSidebarState();
+    persist();
+  }
+
+  function toggleTopTopics(forceValue) {
+    state.settings.showTopTopics = typeof forceValue === 'boolean' ? forceValue : !state.settings.showTopTopics;
+    renderTopTopicsState();
+    persist();
+  }
+
+  function renderSidebarState() {
+    els.workspace.classList.toggle('sidebar-collapsed', !state.settings.sidebarOpen);
+  }
+
+  function renderTopTopicsState() {
+    els.topTopicsPanel.classList.toggle('hidden-panel', !state.settings.showTopTopics);
+    els.toggleTopicsBtn.textContent = state.settings.showTopTopics ? 'Hide Topics' : 'Show Topics';
+  }
+
+  function renderViewMode() {
+    const board = state.settings.mainView !== 'outline';
+    els.boardView.classList.toggle('hidden', !board);
+    els.outlineView.classList.toggle('hidden', board);
+    els.boardViewBtn.classList.toggle('primary', board);
+    els.outlineViewBtn.classList.toggle('primary', !board);
+    els.boardViewBtn.classList.toggle('soft', !board);
+    els.outlineViewBtn.classList.toggle('soft', board);
+  }
+
+  // ── Main render ───────────────────────────────────────────────────────────
+
+  function render() {
+    normalizeState();
+    document.body.className = 'theme-' + (state.settings.theme || 'modern');
+    els.themeSelect.value = state.settings.theme || 'modern';
+    els.searchInput.value = state.ui.search || '';
+    renderSidebarState();
+    renderTopTopicsState();
+    renderViewMode();
+    renderRootLane();
+    renderCanvas();
+    renderOutlineTree();
+    renderOutlineText();
+    updateButtons();
+  }
+
+  function updateButtons() {
+    els.undoBtn.disabled = !state.history.past.length;
+    els.redoBtn.disabled = !state.history.future.length;
+    els.addAnswerBtn.disabled = !state.ui.activeQuestionId;
+    els.selectionPill.textContent = getSelectedItem() ? itemLabel(getSelectedItem()) : 'No selection';
+  }
+
+  // ── Editable helpers ──────────────────────────────────────────────────────
+
+  let pushedThisFocus = false;
 
   function pushHistoryOnce() {
     if (pushedThisFocus) return;
     pushedThisFocus = true;
     pushHistory();
     setTimeout(() => { pushedThisFocus = false; }, 0);
+  }
+
+  function attachEditable(element, onCommit, onBeforeEdit) {
+    element.addEventListener('focus', () => {
+      onBeforeEdit?.();
+      if (element.dataset.empty === 'true') element.textContent = '';
+    });
+    element.addEventListener('keydown', event => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') element.blur();
+    });
+    element.addEventListener('blur', () => onCommit(getEditableText(element)));
+    element.addEventListener('input', () => toggleEditablePlaceholder(element));
   }
 
   function setEditableContent(el, value, placeholder) {
@@ -1248,6 +1392,39 @@
     const raw = (el.textContent || '').trim();
     return raw === (el.dataset.placeholder || '') ? '' : raw;
   }
+
+  // ── Drag and drop (root lane) ─────────────────────────────────────────────
+
+  function wireDragAndDrop(element, arrayRef, itemId, onDone) {
+    element.addEventListener('dragstart', event => {
+      dragState = { dragType: element.dataset.dragType, itemId, arrayRef };
+      event.dataTransfer.effectAllowed = 'move';
+      element.classList.add('dragging');
+    });
+    element.addEventListener('dragend', () => {
+      dragState = null;
+      element.classList.remove('dragging');
+    });
+    element.addEventListener('dragover', event => {
+      if (!dragState) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    element.addEventListener('drop', event => {
+      if (!dragState) return;
+      event.preventDefault();
+      if (element.dataset.dragType !== dragState.dragType) return;
+      const from = arrayRef.indexOf(dragState.itemId);
+      const to = arrayRef.indexOf(itemId);
+      if (from === -1 || to === -1 || from === to) return;
+      pushHistory();
+      arrayRef.splice(to, 0, arrayRef.splice(from, 1)[0]);
+      persist();
+      onDone?.();
+    });
+  }
+
+  // ── Utilities ─────────────────────────────────────────────────────────────
 
   function escapeHtml(value) {
     return String(value || '')
@@ -1292,6 +1469,8 @@
     }, 1800);
   }
 
+  // ── Modal ─────────────────────────────────────────────────────────────────
+
   function openModal(config) {
     els.modalTitle.textContent = config.title || 'Modal';
     els.modalSubtitle.textContent = config.subtitle || '';
@@ -1329,6 +1508,8 @@
     });
   }
 
+  // ── Import / export ───────────────────────────────────────────────────────
+
   function exportJson() {
     const payload = deepClone(state);
     download('strategyfractal.json', JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
@@ -1343,7 +1524,6 @@
       state.history = existingHistory || { past: [], future: [] };
       if (!state.history.past) state.history.past = [];
       if (!state.history.future) state.history.future = [];
-      navStack = [];
       normalizeState();
       persist();
       render();
@@ -1359,7 +1539,6 @@
       'Reset Board',
       'Reset to a fresh canvas? This will clear all current content.',
       () => {
-        navStack = [];
         state = createInitialState();
         persist();
         render();
@@ -1367,35 +1546,7 @@
     );
   }
 
-  function renderContextTrail() {
-    const stage = document.querySelector('.canvas-zone');
-    const trailEl = document.getElementById('contextTrail');
-    if (!trailEl || !stage) return;
-    if (!navStack.length) {
-      trailEl.innerHTML = '';
-      stage.classList.remove('has-trail');
-      return;
-    }
-    stage.classList.add('has-trail');
-    trailEl.innerHTML = '';
-    navStack.forEach((entry, index) => {
-      const item = state.entities.items[entry.itemId];
-      if (!item) return;
-      const q = entry.questionId ? state.entities.questions[entry.questionId] : null;
-      const el = document.createElement('div');
-      el.className = 'context-trail-item';
-      el.innerHTML = `
-        <div class="trail-label">${escapeHtml(itemLabel(item))}</div>
-        ${q ? `<div class="trail-question">${escapeHtml(q.label)} ›</div>` : ''}
-      `;
-      el.addEventListener('click', () => navigateToDepth(index));
-      trailEl.appendChild(el);
-    });
-  }
-
-  function hasAnyContent() {
-    return state.roots.some(id => isItemMeaningful(state.entities.items[id]));
-  }
+  // ── Examples ──────────────────────────────────────────────────────────────
 
   async function loadExamplesManifest() {
     if (examplesManifest) return examplesManifest;
@@ -1445,7 +1596,7 @@
         alert('Failed to load example: ' + err.message);
       }
     };
-    if (hasAnyContent()) {
+    if (state.roots.some(id => isItemMeaningful(state.entities.items[id]))) {
       openConfirm(
         `Load "${escapeHtml(name)}"`,
         'Your current board will be replaced.',
@@ -1456,6 +1607,8 @@
     }
   }
 
+  // ── Event wiring ──────────────────────────────────────────────────────────
+
   function setupEvents() {
     els.newRootBtn.addEventListener('click', addRoot);
     els.addQuestionBtn.addEventListener('click', () => {
@@ -1463,7 +1616,7 @@
       if (item) addCustomQuestion(item.id, '');
     });
     els.addAnswerBtn.addEventListener('click', () => {
-      if (state.ui.activeQuestionId) addAnswer(state.ui.activeQuestionId);
+      if (state.ui.activeQuestionId) addAnswerToQuestion(state.ui.activeQuestionId);
     });
     els.toggleTopicsBtn.addEventListener('click', () => toggleTopTopics());
     els.toggleSidebarBtn.addEventListener('click', () => toggleSidebar());
@@ -1480,8 +1633,8 @@
       subtitle: 'Paste a previously exported JSON payload to resume a session.',
       actions: [
         { label: 'Import', primary: true, onClick: importJson },
-        { label: 'Cancel', onClick: closeModal }
-      ]
+        { label: 'Cancel', onClick: closeModal },
+      ],
     }));
     els.clearBtn.addEventListener('click', clearBoard);
     els.searchInput.addEventListener('input', e => {
@@ -1510,18 +1663,19 @@
     document.addEventListener('keydown', e => {
       const isInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-        return;
+        e.preventDefault(); undo(); return;
       }
       if (((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'z') || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y')) {
-        e.preventDefault();
-        redo();
-        return;
+        e.preventDefault(); redo(); return;
       }
       if (e.key === 'Escape') {
         if (els.modalBackdrop.classList.contains('open')) { closeModal(); return; }
-        if (navStack.length) { navigateBack(); return; }
+        // Collapse any expanded topic nodes
+        Object.values(state.entities.items).forEach(item => {
+          if (item.nodeMode === 'expanded') item.nodeMode = 'collapsed';
+        });
+        persist();
+        renderCanvas();
         return;
       }
       if (isInput) return;
@@ -1533,9 +1687,11 @@
       }
       if (e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        if (state.ui.activeQuestionId) addAnswer(state.ui.activeQuestionId);
+        if (state.ui.activeQuestionId) addAnswerToQuestion(state.ui.activeQuestionId);
       }
     });
+
+    initPanEvents();
   }
 
   render();
