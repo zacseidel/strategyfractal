@@ -48,6 +48,7 @@
   let toastTimer = null;
   let pushedThisFocus = false;
   let examplesManifest = null;
+  let navStack = [];
 
   function createInitialState() {
     const s = {
@@ -272,7 +273,7 @@
     return meaningful || item.questionIds[0] || null;
   }
 
-  function selectItem(itemId, preferredQuestionId = null) {
+  function _selectItem(itemId, preferredQuestionId = null) {
     const item = state.entities.items[itemId];
     if (!item) return;
     state.ui.selectedItemId = itemId;
@@ -285,6 +286,31 @@
     }
     persist();
     render();
+  }
+
+  function selectItem(itemId, preferredQuestionId = null) {
+    navStack = [];
+    _selectItem(itemId, preferredQuestionId);
+  }
+
+  function drillInto(itemId) {
+    if (navStack.length < 20) {
+      navStack.push({ itemId: state.ui.selectedItemId, questionId: state.ui.activeQuestionId });
+    }
+    _selectItem(itemId);
+  }
+
+  function navigateBack() {
+    if (!navStack.length) return;
+    const prev = navStack.pop();
+    _selectItem(prev.itemId, prev.questionId);
+  }
+
+  function navigateToDepth(depth) {
+    const target = navStack[depth];
+    if (!target) return;
+    navStack = navStack.slice(0, depth);
+    _selectItem(target.itemId, target.questionId);
   }
 
   function addRoot() {
@@ -520,6 +546,7 @@
     renderViewMode();
     renderRootLane();
     renderFocusArea();
+    renderContextTrail();
     renderBranchDock();
     renderOutlineTree();
     renderOutlineText();
@@ -627,15 +654,47 @@
         <div class="sort-row">
           <div class="sort-left">
             <div class="drag" title="Drag to reorder">⋮⋮</div>
-            <strong>${escapeHtml(itemLabel(item))}</strong>
+            <div class="root-chip-label" contenteditable="true" data-item-text="${item.id}"></div>
           </div>
           <small>#${index + 1}</small>
         </div>
         <small>${liveQuestions} live question branch${liveQuestions === 1 ? '' : 'es'} • ${branchCount} populated descendant${branchCount === 1 ? '' : 's'}</small>
       `;
-      card.addEventListener('click', () => selectItem(itemId));
+      card.addEventListener('click', e => {
+        if (e.target.closest('[data-item-text]')) return;
+        selectItem(itemId);
+      });
       wireDragAndDrop(card, state.roots, itemId, () => render());
       els.rootLane.appendChild(card);
+
+      const labelEl = card.querySelector(`[data-item-text="${item.id}"]`);
+      setEditableContent(labelEl, item.text, 'Untitled topic');
+      labelEl.addEventListener('mousedown', e => e.stopPropagation());
+      labelEl.addEventListener('focus', () => {
+        pushHistory();
+        if (state.ui.selectedItemId !== itemId) {
+          state.ui.selectedItemId = itemId;
+          state.ui.activeQuestionId = findFirstMeaningfulQuestionId(state.entities.items[itemId]) || null;
+          document.querySelectorAll('.root-chip').forEach(c =>
+            c.classList.toggle('active', c.dataset.id === itemId)
+          );
+          renderFocusArea();
+          renderContextTrail();
+          renderBranchDock();
+          renderOutlineTree();
+          renderOutlineText();
+          updateButtons();
+          persist();
+        }
+        if (labelEl.dataset.empty === 'true') labelEl.textContent = '';
+      });
+      labelEl.addEventListener('keydown', e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') labelEl.blur();
+      });
+      labelEl.addEventListener('blur', () => {
+        updateItemText(itemId, getEditableText(labelEl));
+      });
+      labelEl.addEventListener('input', () => toggleEditablePlaceholder(labelEl));
     });
     if (!visibleCount) {
       els.rootLane.innerHTML = '<div class="empty-state">No matches for the current search.</div>';
@@ -655,23 +714,18 @@
     card.className = 'item-card focus-card';
     card.innerHTML = `
       <div class="item-meta">
-        <span class="pill">${item.kind === 'topic' ? 'Topic' : 'Answer / Subtopic'}</span>
-        <span class="muted">${item.parentQuestionId ? 'Child of ' + escapeHtml(state.entities.questions[item.parentQuestionId]?.label || 'question') : 'Top level'}</span>
+        ${navStack.length ? '<button type="button" class="soft" data-action="nav-back">← Back</button>' : ''}
+        <span class="pill">${item.kind === 'topic' ? 'Topic' : 'Answer'}</span>
+        <span class="muted">${item.parentQuestionId ? escapeHtml(state.entities.questions[item.parentQuestionId]?.label || 'question') + ' branch' : 'Top level'}</span>
       </div>
       <div class="item-text" data-item-text="${item.id}" contenteditable="true" spellcheck="true"></div>
       <div class="mini-toolbar">
         <button type="button" class="soft" data-action="add-source">+ Source</button>
         <button type="button" class="soft" data-action="add-question">+ Question</button>
-        ${item.parentQuestionId ? '<button type="button" class="soft" data-action="go-parent">↑ Parent</button>' : ''}
         <button type="button" class="soft" data-action="duplicate-root">Duplicate</button>
         <button type="button" class="soft" data-action="delete-item">Delete</button>
       </div>
       <div class="inline-sources" data-source-mount="${item.id}"></div>
-      <div class="status">
-        <span class="pill">Questions live in the orbit</span>
-        <span class="pill">Answers open below in the branch dock</span>
-        <span class="pill">Empty branches stay out of the outline</span>
-      </div>
     `;
     els.focusCardMount.appendChild(card);
 
@@ -683,12 +737,9 @@
     card.addEventListener('click', (event) => {
       const action = event.target?.dataset?.action;
       if (!action) return;
+      if (action === 'nav-back') { navigateBack(); return; }
       if (action === 'add-question') addCustomQuestion(item.id, '');
       if (action === 'add-source') addSource(item.id);
-      if (action === 'go-parent' && item.parentQuestionId) {
-        const parentQ = state.entities.questions[item.parentQuestionId];
-        if (parentQ) selectItem(parentQ.parentItemId, parentQ.id);
-      }
       if (action === 'duplicate-root') {
         pushHistory();
         const dup = cloneSubtreeAsRoot(item.id);
@@ -823,12 +874,7 @@
     }
 
     if (!q) {
-      els.branchDock.innerHTML = `
-        <div class="branch-empty">
-          <strong>No branch selected yet.</strong><br />
-          Click a question bubble in the orbit to open a branch. Empty question branches stay off the outline until you add content.
-        </div>
-      `;
+      els.branchDock.innerHTML = '';
       return;
     }
 
@@ -847,9 +893,9 @@
           </div>
         </div>
         <div class="status">
-          <span class="pill">${q.answerIds.length} answer card${q.answerIds.length === 1 ? '' : 's'}</span>
-          <span class="pill">Drag answers to reorder</span>
-          <span class="pill">Focus an answer to keep drilling down</span>
+          <span class="pill">${q.answerIds.length} answer${q.answerIds.length === 1 ? '' : 's'}</span>
+          <span class="pill">Drag to reorder</span>
+          <span class="pill">Click → or card body to drill in</span>
         </div>
         <div id="answerList" class="answer-list"></div>
       </div>
@@ -899,12 +945,12 @@
           <div class="sort-left">
             <div class="drag">⋮⋮</div>
             <span class="pill">${sourceCount} source${sourceCount === 1 ? '' : 's'}</span>
-            <span class="pill">${countInstantiatedQuestions(item)} live question branch${countInstantiatedQuestions(item) === 1 ? '' : 'es'}</span>
+            <span class="pill">${countInstantiatedQuestions(item)} question branch${countInstantiatedQuestions(item) === 1 ? '' : 'es'}</span>
           </div>
           <div class="sort-right">
-            <button type="button" class="soft" data-action="focus-item">Focus</button>
             <button type="button" class="soft" data-action="add-source">+ Source</button>
             <button type="button" class="soft" data-action="delete-item">Delete</button>
+            <button type="button" class="drill-in-btn" data-action="drill-in" title="Explore this answer">→</button>
           </div>
         </div>
         <div class="answer-text" contenteditable="true" data-item-text="${item.id}"></div>
@@ -918,10 +964,12 @@
       renderSourceEditor(card.querySelector(`[data-source-mount="${item.id}"]`), item, 'answer');
       card.addEventListener('click', event => {
         const action = event.target?.dataset?.action;
-        if (!action) return;
-        if (action === 'focus-item') selectItem(item.id);
-        if (action === 'add-source') addSource(item.id);
-        if (action === 'delete-item') deleteItem(item.id);
+        if (action === 'drill-in') { drillInto(item.id); return; }
+        if (action === 'add-source') { addSource(item.id); return; }
+        if (action === 'delete-item') { deleteItem(item.id); return; }
+        if (!event.target.closest('[contenteditable], input, button, a, [data-source-mount]')) {
+          drillInto(item.id);
+        }
       });
       container.appendChild(card);
     });
@@ -1251,6 +1299,7 @@
       state.history = existingHistory || { past: [], future: [] };
       if (!state.history.past) state.history.past = [];
       if (!state.history.future) state.history.future = [];
+      navStack = [];
       normalizeState();
       persist();
       render();
@@ -1263,9 +1312,36 @@
 
   function clearBoard() {
     if (!confirm('Reset the board to a fresh StrategyFractal canvas? This clears local storage.')) return;
+    navStack = [];
     state = createInitialState();
     persist();
     render();
+  }
+
+  function renderContextTrail() {
+    const stage = document.querySelector('.canvas-zone');
+    const trailEl = document.getElementById('contextTrail');
+    if (!trailEl || !stage) return;
+    if (!navStack.length) {
+      trailEl.innerHTML = '';
+      stage.classList.remove('has-trail');
+      return;
+    }
+    stage.classList.add('has-trail');
+    trailEl.innerHTML = '';
+    navStack.forEach((entry, index) => {
+      const item = state.entities.items[entry.itemId];
+      if (!item) return;
+      const q = entry.questionId ? state.entities.questions[entry.questionId] : null;
+      const el = document.createElement('div');
+      el.className = 'context-trail-item';
+      el.innerHTML = `
+        <div class="trail-label">${escapeHtml(itemLabel(item))}</div>
+        ${q ? `<div class="trail-question">${escapeHtml(q.label)} ›</div>` : ''}
+      `;
+      el.addEventListener('click', () => navigateToDepth(index));
+      trailEl.appendChild(el);
+    });
   }
 
   function hasAnyContent() {
@@ -1385,7 +1461,8 @@
         return;
       }
       if (e.key === 'Escape') {
-        closeModal();
+        if (els.modalBackdrop.classList.contains('open')) { closeModal(); return; }
+        if (navStack.length) { navigateBack(); return; }
         return;
       }
       if (isInput) return;

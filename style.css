@@ -366,21 +366,7 @@
       pointer-events: none;
     }
 
-    .focus-hint {
-      position: absolute;
-      inset: 18px auto auto 18px;
-      z-index: 4;
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.76);
-      border: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 0.84rem;
-      backdrop-filter: blur(12px);
-      max-width: calc(100% - 36px);
-    }
-
-    .canvas-zone {
+.canvas-zone {
       position: relative;
       z-index: 1;
       min-height: 0;
@@ -787,6 +773,75 @@
       .orbit-bubble { min-width: 94px; max-width: 140px; }
       .focus-stage { grid-template-rows: 330px 1fr; min-height: 760px; }
     }
+
+    .canvas-zone.has-trail .focus-card-wrap {
+      left: 200px;
+      width: min(460px, calc(100% - 420px));
+    }
+
+    .context-trail {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      width: 168px;
+      z-index: 3;
+    }
+
+    .context-trail-item {
+      padding: 10px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.52);
+      backdrop-filter: blur(8px);
+      cursor: pointer;
+      opacity: 0.72;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      font-size: 0.84rem;
+      display: grid;
+      gap: 2px;
+      text-align: left;
+    }
+
+    .context-trail-item:hover { opacity: 1; transform: translateX(3px); }
+
+    .trail-label {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .trail-question { color: var(--muted); font-size: 0.76rem; }
+
+    .drill-in-btn {
+      font-size: 1.1rem;
+      min-width: 32px;
+      opacity: 0.45;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .answer-card:hover .drill-in-btn { opacity: 1; transform: translateX(3px); }
+
+    .root-chip-label {
+      outline: none;
+      border-radius: 8px;
+      padding: 2px 4px;
+      min-width: 60px;
+      cursor: text;
+      font-weight: 700;
+    }
+
+    .root-chip-label:focus {
+      background: rgba(255,255,255,0.6);
+      box-shadow: 0 0 0 2px rgba(79,124,255,0.2);
+    }
+
+    .root-chip-label[data-empty="true"] { color: #99a3ba; }
 
     .examples-wrap {
       position: relative;
