@@ -40,7 +40,9 @@
     modalActions: document.getElementById('modalActions'),
     closeModalBtn: document.getElementById('closeModalBtn'),
     examplesBtn: document.getElementById('examplesBtn'),
-    examplesDropdown: document.getElementById('examplesDropdown')
+    examplesDropdown: document.getElementById('examplesDropdown'),
+    canvasZone: document.querySelector('.canvas-zone'),
+    focusCardWrap: document.querySelector('.focus-card-wrap')
   };
 
   let state = loadState() || createInitialState();
@@ -201,6 +203,7 @@
     state.meta.updatedAt = Date.now();
     state.meta.lastSavedAt = Date.now();
     const payload = deepClone(state);
+    delete payload.history;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch (err) {
@@ -327,12 +330,25 @@
   function addCustomQuestion(parentItemId, label = '') {
     const item = state.entities.items[parentItemId];
     if (!item) return;
-    let chosen = label;
-    if (!chosen) {
-      chosen = prompt('Name this custom question branch:', 'Custom');
-      if (chosen === null) return;
+    if (!label) {
+      openModal({
+        title: 'New Custom Question',
+        subtitle: 'Name this custom question branch.',
+        initialValue: 'Custom',
+        actions: [
+          { label: 'Add', primary: true, onClick: value => {
+            closeModal();
+            _commitAddCustomQuestion(parentItemId, (value || '').trim() || 'Custom');
+          }},
+          { label: 'Cancel', onClick: closeModal },
+        ],
+      });
+      return;
     }
-    chosen = (chosen || '').trim() || 'Custom';
+    _commitAddCustomQuestion(parentItemId, (label || '').trim() || 'Custom');
+  }
+
+  function _commitAddCustomQuestion(parentItemId, chosen) {
     pushHistory();
     const q = createQuestionInternal(state, parentItemId, chosen);
     state.ui.activeQuestionId = q.id;
@@ -392,17 +408,22 @@
   function deleteQuestion(questionId) {
     const q = state.entities.questions[questionId];
     if (!q) return;
-    if (!confirm('Delete this question branch and all nested answers beneath it?')) return;
-    pushHistory();
-    const parentItemId = q.parentItemId;
-    deleteQuestionRecursive(questionId);
-    const parentItem = state.entities.items[parentItemId];
-    if (parentItem) {
-      parentItem.questionIds = parentItem.questionIds.filter(id => id !== questionId);
-    }
-    if (state.ui.activeQuestionId === questionId) state.ui.activeQuestionId = null;
-    persist();
-    render();
+    openConfirm(
+      'Delete Question Branch',
+      'This will delete the question and all nested answers beneath it.',
+      () => {
+        pushHistory();
+        const parentItemId = q.parentItemId;
+        deleteQuestionRecursive(questionId);
+        const parentItem = state.entities.items[parentItemId];
+        if (parentItem) {
+          parentItem.questionIds = parentItem.questionIds.filter(id => id !== questionId);
+        }
+        if (state.ui.activeQuestionId === questionId) state.ui.activeQuestionId = null;
+        persist();
+        render();
+      }
+    );
   }
 
   function deleteQuestionRecursive(questionId) {
@@ -437,12 +458,17 @@
   function deleteItem(itemId) {
     const item = state.entities.items[itemId];
     if (!item) return;
-    if (!confirm('Delete this card and all nested branches beneath it?')) return;
-    pushHistory();
-    deleteItemRecursive(itemId);
-    normalizeState();
-    persist();
-    render();
+    openConfirm(
+      'Delete Card',
+      'This will delete the card and all nested branches beneath it.',
+      () => {
+        pushHistory();
+        deleteItemRecursive(itemId);
+        normalizeState();
+        persist();
+        render();
+      }
+    );
   }
 
   function updateItemText(itemId, text) {
@@ -731,7 +757,7 @@
 
     const editable = card.querySelector(`[data-item-text="${item.id}"]`);
     setEditableContent(editable, item.text, item.kind === 'topic' ? 'What\'s the topic for today?' : 'Add an answer or subtopic…');
-    attachEditable(editable, value => updateItemText(item.id, value), () => pushHistory());
+    attachEditable(editable, value => updateItemText(item.id, value), pushHistoryOnce);
     renderSourceEditor(card.querySelector(`[data-source-mount="${item.id}"]`), item, 'card');
 
     card.addEventListener('click', (event) => {
@@ -819,11 +845,12 @@
   }
 
   function renderOrbit(item) {
+    els.orbit.innerHTML = '';
     const entries = buildOrbitEntries(item);
     if (!entries.length) return;
-    const stage = document.querySelector('.canvas-zone');
+    const stage = els.canvasZone;
     const stageRect = stage.getBoundingClientRect();
-    const cardRect = document.querySelector('.focus-card-wrap').getBoundingClientRect();
+    const cardRect = els.focusCardWrap.getBoundingClientRect();
     const centerX = cardRect.right - stageRect.left + 18;
     const centerY = cardRect.top - stageRect.top + cardRect.height / 2;
     const radiusX = Math.min(250, Math.max(155, stageRect.width - cardRect.width - 100));
@@ -897,7 +924,7 @@
           <span class="pill">Drag to reorder</span>
           <span class="pill">Click → or card body to drill in</span>
         </div>
-        <div id="answerList" class="answer-list"></div>
+        <div class="answer-list"></div>
       </div>
     `;
     els.branchDock.appendChild(wrap);
@@ -905,7 +932,7 @@
     const branchLabel = wrap.querySelector(`[data-question-label="${q.id}"]`);
     if (branchLabel) {
       setEditableContent(branchLabel, q.label, 'Custom question');
-      attachEditable(branchLabel, value => updateQuestionLabel(q.id, value), () => pushHistory());
+      attachEditable(branchLabel, value => updateQuestionLabel(q.id, value), pushHistoryOnce);
     }
 
     wrap.addEventListener('click', event => {
@@ -915,7 +942,7 @@
       if (action === 'delete-question') deleteQuestion(q.id);
     });
 
-    renderAnswerList(wrap.querySelector('#answerList'), q);
+    renderAnswerList(wrap.querySelector('.answer-list'), q);
   }
 
   function buildChildQuestionSummary(item) {
@@ -960,7 +987,7 @@
       wireDragAndDrop(card, question.answerIds, answerId, () => render());
       const answerText = card.querySelector(`[data-item-text="${item.id}"]`);
       setEditableContent(answerText, item.text, 'Add an answer or subtopic…');
-      attachEditable(answerText, value => updateItemText(item.id, value), () => pushHistory());
+      attachEditable(answerText, value => updateItemText(item.id, value), pushHistoryOnce);
       renderSourceEditor(card.querySelector(`[data-source-mount="${item.id}"]`), item, 'answer');
       card.addEventListener('click', event => {
         const action = event.target?.dataset?.action;
@@ -980,11 +1007,12 @@
     container.innerHTML = '';
     if (!item.sourceList.length) {
       if (mode === 'card') {
-        container.innerHTML = '<div class="muted" style="font-size: 0.82rem;">No sources on this card yet.</div>';
+        container.innerHTML = '<div class="panel-subtitle">No sources on this card yet.</div>';
       }
       return;
     }
     item.sourceList.forEach(src => {
+      const safeUrl = /^https?:\/\//i.test(src.url || '') ? src.url : null;
       const row = document.createElement('div');
       row.className = 'source-grid';
       row.innerHTML = `
@@ -995,7 +1023,7 @@
         </div>
         <div class="sort-row">
           <div class="sort-left">
-            ${src.url ? `<a href="${escapeAttr(src.url)}" target="_blank" rel="noopener noreferrer" class="pill">Open ↗</a>` : ''}
+            ${safeUrl ? `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener noreferrer" class="pill">Open ↗</a>` : ''}
           </div>
           <div class="sort-right">
             <button type="button" class="soft" data-action="delete-source">Delete</button>
@@ -1268,6 +1296,7 @@
     els.modalTitle.textContent = config.title || 'Modal';
     els.modalSubtitle.textContent = config.subtitle || '';
     els.modalTextarea.value = config.initialValue || '';
+    els.modalTextarea.style.display = config.hideTextarea ? 'none' : '';
     els.modalActions.innerHTML = '';
     (config.actions || []).forEach(action => {
       const btn = document.createElement('button');
@@ -1278,11 +1307,26 @@
       els.modalActions.appendChild(btn);
     });
     els.modalBackdrop.classList.add('open');
-    setTimeout(() => els.modalTextarea.focus(), 10);
+    setTimeout(() => {
+      if (!config.hideTextarea) els.modalTextarea.focus();
+      else els.modalActions.querySelector('button')?.focus();
+    }, 10);
   }
 
   function closeModal() {
     els.modalBackdrop.classList.remove('open');
+  }
+
+  function openConfirm(title, subtitle, onConfirm) {
+    openModal({
+      title,
+      subtitle,
+      hideTextarea: true,
+      actions: [
+        { label: 'Confirm', primary: true, onClick: () => { closeModal(); onConfirm(); } },
+        { label: 'Cancel', onClick: closeModal },
+      ],
+    });
   }
 
   function exportJson() {
@@ -1311,11 +1355,16 @@
   }
 
   function clearBoard() {
-    if (!confirm('Reset the board to a fresh StrategyFractal canvas? This clears local storage.')) return;
-    navStack = [];
-    state = createInitialState();
-    persist();
-    render();
+    openConfirm(
+      'Reset Board',
+      'Reset to a fresh canvas? This will clear all current content.',
+      () => {
+        navStack = [];
+        state = createInitialState();
+        persist();
+        render();
+      }
+    );
   }
 
   function renderContextTrail() {
@@ -1386,14 +1435,24 @@
 
   async function loadExample(file, name) {
     els.examplesDropdown.classList.remove('open');
-    if (hasAnyContent() && !confirm(`Load "${name}"? Your current board will be replaced.`)) return;
-    try {
-      const res = await fetch(`examples/${file}`);
-      if (!res.ok) throw new Error(`Could not fetch examples/${file}`);
-      const raw = await res.text();
-      importJson(raw);
-    } catch (err) {
-      alert('Failed to load example: ' + err.message);
+    const doLoad = async () => {
+      try {
+        const res = await fetch(`examples/${file}`);
+        if (!res.ok) throw new Error(`Could not fetch examples/${file}`);
+        const raw = await res.text();
+        importJson(raw);
+      } catch (err) {
+        alert('Failed to load example: ' + err.message);
+      }
+    };
+    if (hasAnyContent()) {
+      openConfirm(
+        `Load "${escapeHtml(name)}"`,
+        'Your current board will be replaced.',
+        doLoad
+      );
+    } else {
+      doLoad();
     }
   }
 

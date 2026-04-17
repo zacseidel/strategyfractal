@@ -285,6 +285,12 @@
       font-weight: 700;
     }
 
+    .panel-subtitle {
+      font-size: 0.82rem;
+      margin-top: 4px;
+      color: var(--muted);
+    }
+
     .panel-body {
       padding: 14px 16px 16px;
       display: grid;
