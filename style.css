@@ -6,6 +6,19 @@
 
 /* ── Design tokens ── */
 
+.topics-strip {
+  border-radius: 0 !important;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+.main > #boardView {
+  border-radius: 0;
+}
+
+
+
 :root {
   --bg: #f6f8ff;
   --bg-soft: #eef3ff;
