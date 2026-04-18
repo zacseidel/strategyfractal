@@ -17,6 +17,8 @@
   border-radius: 0;
 }
 
+/* Always show label on + Answer since it's contextual */
+#addAnswerBtn .btn-label { display: inline; }
 
 
 :root {
