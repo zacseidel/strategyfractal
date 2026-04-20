@@ -4,8 +4,8 @@
   const THEMES = ['modern', 'sticky', 'playful', 'minimal'];
   const ZOOM_MIN = 0.12;
   const ZOOM_MAX = 2.0;
-  const ARC_R = 120;
-  const MIN_ARC_GAP = 36;
+  const ARC_R = 200;
+  const MIN_ARC_GAP = 60;
   const ROW_GAP = 16;
   const NODE_W_TOPIC = 260;
   const NODE_W_QUESTION = 280;
@@ -381,6 +381,31 @@
     return 56 + answerCount * 58;
   }
 
+  const ANSWER_H = 58; // matches estimateQuestionHeight per-answer increment
+
+  // Total vertical space needed by all sub-questions hanging off an item.
+  function computeFullSubtreeH(itemId) {
+    const item = state.entities.items[itemId];
+    if (!item || !item.questionIds.length) return 0;
+    const N = item.questionIds.length;
+    return item.questionIds.reduce((total, qId, i) => {
+      return total + computeQuestionBlockH(qId) + (i < N - 1 ? ROW_GAP : 0);
+    }, 0);
+  }
+
+  // Vertical space a question "block" needs: max of its card height and the
+  // sum of slots required by each answer's sub-tree.
+  function computeQuestionBlockH(questionId) {
+    const q = state.entities.questions[questionId];
+    if (!q) return 0;
+    const qH = estimateQuestionHeight(q);
+    if (!q.answerIds.length) return qH;
+    const ansTotal = q.answerIds.reduce((s, aid, i) => {
+      return s + Math.max(computeFullSubtreeH(aid), ANSWER_H) + (i < q.answerIds.length - 1 ? ROW_GAP : 0);
+    }, 0);
+    return Math.max(qH, ansTotal);
+  }
+
   function computeLayout() {
     const layout = new Map();
     let rootY = 60;
@@ -405,41 +430,48 @@
     if (!parentPos) return 0;
 
     const N = item.questionIds.length;
-    const heights = item.questionIds.map(qId => {
-      const q = state.entities.questions[qId];
-      return q ? estimateQuestionHeight(q) : 0;
-    });
-    const totalH = heights.reduce((sum, h, i) => sum + h + (i < N - 1 ? ROW_GAP : 0), 0);
-
-    const arcCenterY = parentPos.y + parentPos.h / 2;
     const arcCenterX = parentPos.x + parentPos.w;
-    const qY_start = Math.max(parentPos.y, arcCenterY - totalH / 2);
-    let qY = qY_start;
+
+    // Slot height = full subtree height for each question (prevents overlap)
+    const slotHeights = item.questionIds.map(qId => computeQuestionBlockH(qId));
+    const totalH = slotHeights.reduce((s, h, i) => s + h + (i < N - 1 ? ROW_GAP : 0), 0);
+
+    // Center group on parent's vertical midpoint; clamp so nothing goes above parent
+    const arcCenterY = parentPos.y + parentPos.h / 2;
+    const slotTopY = Math.max(parentPos.y, arcCenterY - totalH / 2);
+    let slotY = slotTopY;
 
     item.questionIds.forEach((questionId, i) => {
       const q = state.entities.questions[questionId];
       if (!q) return;
-      const qH = heights[i];
+      const slotH = slotHeights[i];
+      const qH = estimateQuestionHeight(q);
 
+      // Arc x-offset: middle questions are farthest right, top/bottom closest
       const angle = N === 1 ? 0 : ((i / (N - 1)) - 0.5) * Math.PI;
       const xGap = MIN_ARC_GAP + (ARC_R - MIN_ARC_GAP) * Math.cos(angle);
       const qX = arcCenterX + xGap;
 
-      layout.set(questionId, { x: qX, y: qY, w: NODE_W_QUESTION, h: qH });
+      // Question card sits at top of its slot
+      layout.set(questionId, { x: qX, y: slotY, w: NODE_W_QUESTION, h: qH });
 
-      let childY = qY;
-      q.answerIds.forEach(answerId => {
+      // Each answer gets a sub-slot proportional to its sub-tree height;
+      // answer layout position is used for connection-line endpoints
+      let childSlotY = slotY;
+      q.answerIds.forEach((answerId, ai) => {
         const answer = state.entities.items[answerId];
         if (!answer) return;
-        layout.set(answerId, { x: qX, y: childY, w: NODE_W_QUESTION, h: 0, inline: true });
-        const subtreeH = layoutSubtree(answerId, depth + 1, childY, layout);
-        childY += subtreeH || qH;
+        const ansSubH = computeFullSubtreeH(answerId);
+        const ansSlotH = Math.max(ansSubH, ANSWER_H);
+        layout.set(answerId, { x: qX, y: childSlotY, w: NODE_W_QUESTION, h: ansSlotH, inline: true });
+        if (ansSubH > 0) layoutSubtree(answerId, depth + 1, childSlotY, layout);
+        childSlotY += ansSlotH + (ai < q.answerIds.length - 1 ? ROW_GAP : 0);
       });
 
-      qY += qH + ROW_GAP;
+      slotY += slotH + ROW_GAP;
     });
 
-    return qY_start - parentPos.y + totalH;
+    return slotTopY - parentPos.y + totalH;
   }
 
   // ── Canvas rendering ──────────────────────────────────────────────────────
@@ -496,7 +528,10 @@
           nodeEl.draggable = false;
           const handle = nodeEl.querySelector('.q-drag-handle');
           if (handle) {
-            handle.addEventListener('mousedown', () => { nodeEl.draggable = true; });
+            handle.addEventListener('mousedown', () => {
+              nodeEl.draggable = true;
+              window.addEventListener('mouseup', () => { nodeEl.draggable = false; }, { once: true });
+            });
             nodeEl.addEventListener('dragend', () => { nodeEl.draggable = false; });
           }
           wireDragAndDrop(nodeEl, parentItem.questionIds, q.id, () => renderCanvas());
@@ -648,7 +683,10 @@
         bulletEl.draggable = false;
         const handle = bulletEl.querySelector('.a-drag-handle');
         if (handle) {
-          handle.addEventListener('mousedown', () => { bulletEl.draggable = true; });
+          handle.addEventListener('mousedown', () => {
+            bulletEl.draggable = true;
+            window.addEventListener('mouseup', () => { bulletEl.draggable = false; }, { once: true });
+          });
           bulletEl.addEventListener('dragend', () => { bulletEl.draggable = false; });
         }
         wireDragAndDrop(bulletEl, question.answerIds, answerId, () => renderCanvas());
@@ -820,9 +858,12 @@
   }
 
   function initPanEvents() {
+    let didPan = false;
+
     els.boardView.addEventListener('wheel', handleWheel, { passive: false });
 
     els.boardView.addEventListener('click', e => {
+      if (didPan) { didPan = false; return; }
       if (e.target.closest('.node')) return;
       if (state.ui.selectedItemId || state.ui.activeQuestionId) {
         state.ui.selectedItemId = null;
@@ -835,12 +876,14 @@
     els.boardView.addEventListener('mousedown', e => {
       if (e.target.closest('[data-node-id], button, [contenteditable], input, select')) return;
       isPanning = true;
+      didPan = false;
       panStart = { x: e.clientX - state.ui.canvas.panX, y: e.clientY - state.ui.canvas.panY };
       els.boardView.classList.add('is-panning');
     });
 
     window.addEventListener('mousemove', e => {
       if (!isPanning) return;
+      didPan = true;
       const newPanX = e.clientX - panStart.x;
       const newPanY = e.clientY - panStart.y;
       state.ui.canvas.panX = newPanX;
