@@ -436,7 +436,7 @@
     }
 
     .node-text-area {
-      min-height: 80px;
+      min-height: 2rem;
       line-height: 1.55;
       border-radius: 12px;
       border: 1px dashed transparent;
@@ -456,16 +456,17 @@
       gap: 6px;
     }
 
-    .node-topic-card:hover .node-question-buttons,
+    .node-topic-card.is-active .node-question-buttons,
     .node-topic-card:focus-within .node-question-buttons { display: flex; }
 
-    /* Header chrome: fade in on hover rather than jump-in */
+    /* Header chrome: fade in on click/focus rather than hover */
     .node-card-header .node-chrome {
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.15s ease;
     }
-    .node-topic-card:hover .node-card-header .node-chrome {
+    .node-topic-card.is-active .node-card-header .node-chrome,
+    .node-topic-card:focus-within .node-card-header .node-chrome {
       opacity: 1;
       pointer-events: auto;
     }
@@ -476,7 +477,7 @@
       pointer-events: none;
       transition: opacity 0.15s ease;
     }
-    .node-topic-card:hover .node-card-body .node-chrome,
+    .node-topic-card.is-active .node-card-body .node-chrome,
     .node-topic-card:focus-within .node-card-body .node-chrome {
       opacity: 1;
       pointer-events: auto;
@@ -594,7 +595,7 @@
       padding-left: 12px;
     }
 
-    .node-question-card:hover .answer-bullet-actions,
+    .node-question-card.is-active .answer-bullet-actions,
     .node-question-card:focus-within .answer-bullet-actions { display: flex; }
 
     /* Question header delete button */
@@ -603,7 +604,8 @@
       pointer-events: none;
       transition: opacity 0.15s ease;
     }
-    .node-question-card:hover .node-q-header .node-chrome {
+    .node-question-card.is-active .node-q-header .node-chrome,
+    .node-question-card:focus-within .node-q-header .node-chrome {
       opacity: 1;
       pointer-events: auto;
     }
@@ -635,7 +637,7 @@
       background: rgba(255,255,255,0.16);
     }
 
-    .node-question-card:hover .node-q-footer,
+    .node-question-card.is-active .node-q-footer,
     .node-question-card:focus-within .node-q-footer { display: flex; }
 
     .split-btn {

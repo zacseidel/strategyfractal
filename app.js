@@ -372,7 +372,7 @@
     if (!item) return 44;
     if (item.nodeMode === 'collapsed') return 40;
     const srcH = item.sourceList.length * 64;
-    return 140 + srcH;
+    return 90 + srcH;
   }
 
   function estimateQuestionHeight(question) {
@@ -413,7 +413,8 @@
 
     const arcCenterY = parentPos.y + parentPos.h / 2;
     const arcCenterX = parentPos.x + parentPos.w;
-    let qY = arcCenterY - totalH / 2;
+    const qY_start = Math.max(parentPos.y, arcCenterY - totalH / 2);
+    let qY = qY_start;
 
     item.questionIds.forEach((questionId, i) => {
       const q = state.entities.questions[questionId];
@@ -438,7 +439,7 @@
       qY += qH + ROW_GAP;
     });
 
-    return totalH;
+    return qY_start - parentPos.y + totalH;
   }
 
   // ── Canvas rendering ──────────────────────────────────────────────────────
@@ -765,10 +766,9 @@
       const y1 = parentPos.y + parentPos.h / 2;
       const x2 = qPos.x;
       const y2 = qPos.y + qPos.h / 2;
-      const mx = Math.max(20, Math.abs(x2 - x1) * 0.45);
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', `M ${x1},${y1} C ${x1 + mx},${y1} ${x2 - mx},${y2} ${x2},${y2}`);
+      path.setAttribute('d', `M ${x1},${y1} L ${x2},${y2}`);
       path.setAttribute('class', `connection-path ${colorClassForLabel(question.label)}`);
       els.connectionLayer.appendChild(path);
     });
@@ -821,6 +821,16 @@
 
   function initPanEvents() {
     els.boardView.addEventListener('wheel', handleWheel, { passive: false });
+
+    els.boardView.addEventListener('click', e => {
+      if (e.target.closest('.node')) return;
+      if (state.ui.selectedItemId || state.ui.activeQuestionId) {
+        state.ui.selectedItemId = null;
+        state.ui.activeQuestionId = null;
+        persist();
+        renderCanvas();
+      }
+    });
 
     els.boardView.addEventListener('mousedown', e => {
       if (e.target.closest('[data-node-id], button, [contenteditable], input, select')) return;
