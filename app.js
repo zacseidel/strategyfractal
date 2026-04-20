@@ -4,8 +4,9 @@
   const THEMES = ['modern', 'sticky', 'playful', 'minimal'];
   const ZOOM_MIN = 0.12;
   const ZOOM_MAX = 2.0;
-  const ARC_R = 200;
-  const MIN_ARC_GAP = 60;
+  const HALF_SPREAD = Math.PI * 5 / 12; // 75° fan, ~1 o'clock to ~5 o'clock
+  const ARC_R_MIN = 120;
+  const EXPANDED_H_PAD = 60; // extra vertical clearance for expanded card footer
   const ROW_GAP = 16;
   const NODE_W_TOPIC = 260;
   const NODE_W_QUESTION = 280;
@@ -406,17 +407,50 @@
     return Math.max(qH, ansTotal);
   }
 
+  // Minimum arc radius so adjacent expanded slots never collide.
+  function computeArcR(N, slotHeights) {
+    if (N <= 1) return ARC_R_MIN;
+    const Da = 2 * HALF_SPREAD / (N - 1);
+    let minR = ARC_R_MIN;
+    for (let i = 0; i < N - 1; i++) {
+      const a = -HALF_SPREAD + i * Da;
+      const ds = Math.sin(a + Da) - Math.sin(a);
+      if (ds <= 0) continue;
+      const need = (slotHeights[i] + slotHeights[i + 1]) / 2 + ROW_GAP;
+      minR = Math.max(minR, need / ds);
+    }
+    return minR;
+  }
+
   function computeLayout() {
     const layout = new Map();
-    let rootY = 60;
+    let arcBottom = 60;
 
     state.roots.forEach(rootId => {
       const item = state.entities.items[rootId];
       if (!item) return;
       const h = estimateItemHeight(item);
-      layout.set(rootId, { x: 60, y: rootY, w: NODE_W_TOPIC, h });
-      const subtreeH = layoutSubtree(rootId, 0, rootY, layout);
-      rootY += Math.max(h, subtreeH) + ROW_GAP * 2;
+      const N = item.questionIds.filter(qId => state.entities.questions[qId]).length;
+
+      if (N === 0) {
+        layout.set(rootId, { x: 60, y: arcBottom, w: NODE_W_TOPIC, h });
+        arcBottom += h + ROW_GAP * 3;
+        return;
+      }
+
+      const slotHeights = item.questionIds.map(qId => {
+        const q = state.entities.questions[qId];
+        const qH = q ? estimateQuestionHeight(q) : 0;
+        return Math.max(computeQuestionBlockH(qId), qH + EXPANDED_H_PAD);
+      });
+      const R = computeArcR(N, slotHeights);
+      const arcTopExt = R * Math.sin(HALF_SPREAD) + (slotHeights[0] || 0) / 2;
+      const cy = arcBottom + ROW_GAP * 3 + arcTopExt;
+      const y = cy - h / 2;
+      layout.set(rootId, { x: 60, y, w: NODE_W_TOPIC, h });
+      layoutSubtree(rootId, 0, y, layout);
+      const arcBotExt = R * Math.sin(HALF_SPREAD) + (slotHeights[N - 1] || 0) / 2;
+      arcBottom = cy + arcBotExt;
     });
 
     return layout;
@@ -430,16 +464,15 @@
     if (!parentPos) return 0;
 
     const N = item.questionIds.length;
-    const arcCenterX = parentPos.x + parentPos.w;
+    const cx = parentPos.x + parentPos.w;
+    const cy = parentPos.y + parentPos.h / 2;
 
-    // Slot height = full subtree height for each question (prevents overlap)
-    const slotHeights = item.questionIds.map(qId => computeQuestionBlockH(qId));
-    const totalH = slotHeights.reduce((s, h, i) => s + h + (i < N - 1 ? ROW_GAP : 0), 0);
-
-    // Center group on parent's vertical midpoint; clamp so nothing goes above parent
-    const arcCenterY = parentPos.y + parentPos.h / 2;
-    const slotTopY = Math.max(parentPos.y, arcCenterY - totalH / 2);
-    let slotY = slotTopY;
+    const slotHeights = item.questionIds.map(qId => {
+      const q = state.entities.questions[qId];
+      const qH = q ? estimateQuestionHeight(q) : 0;
+      return Math.max(computeQuestionBlockH(qId), qH + EXPANDED_H_PAD);
+    });
+    const R = computeArcR(N, slotHeights);
 
     item.questionIds.forEach((questionId, i) => {
       const q = state.entities.questions[questionId];
@@ -447,31 +480,29 @@
       const slotH = slotHeights[i];
       const qH = estimateQuestionHeight(q);
 
-      // Arc x-offset: middle questions are farthest right, top/bottom closest
-      const angle = N === 1 ? 0 : ((i / (N - 1)) - 0.5) * Math.PI;
-      const xGap = MIN_ARC_GAP + (ARC_R - MIN_ARC_GAP) * Math.cos(angle);
-      const qX = arcCenterX + xGap;
+      const angle = N === 1 ? 0 : -HALF_SPREAD + i * 2 * HALF_SPREAD / (N - 1);
+      const qCenterX = cx + R * Math.cos(angle);
+      const qCenterY = cy + R * Math.sin(angle);
 
-      // Question card sits at top of its slot
-      layout.set(questionId, { x: qX, y: slotY, w: NODE_W_QUESTION, h: qH });
+      layout.set(questionId, { x: qCenterX, y: qCenterY - qH / 2, w: NODE_W_QUESTION, h: qH });
 
-      // Each answer gets a sub-slot proportional to its sub-tree height;
-      // answer layout position is used for connection-line endpoints
-      let childSlotY = slotY;
+      const slotTopY = qCenterY - slotH / 2;
+      let childSlotY = slotTopY;
       q.answerIds.forEach((answerId, ai) => {
         const answer = state.entities.items[answerId];
         if (!answer) return;
         const ansSubH = computeFullSubtreeH(answerId);
         const ansSlotH = Math.max(ansSubH, ANSWER_H);
-        layout.set(answerId, { x: qX, y: childSlotY, w: NODE_W_QUESTION, h: ansSlotH, inline: true });
+        layout.set(answerId, { x: qCenterX, y: childSlotY, w: NODE_W_QUESTION, h: ansSlotH, inline: true });
         if (ansSubH > 0) layoutSubtree(answerId, depth + 1, childSlotY, layout);
         childSlotY += ansSlotH + (ai < q.answerIds.length - 1 ? ROW_GAP : 0);
       });
-
-      slotY += slotH + ROW_GAP;
     });
 
-    return slotTopY - parentPos.y + totalH;
+    const botAngle = N === 1 ? 0 : HALF_SPREAD;
+    const lastSlotH = slotHeights[N - 1] || 0;
+    const arcBot = cy + R * Math.sin(botAngle) + lastSlotH / 2;
+    return Math.max(arcBot - parentPos.y, 0);
   }
 
   // ── Canvas rendering ──────────────────────────────────────────────────────
