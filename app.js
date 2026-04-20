@@ -4,7 +4,8 @@
   const THEMES = ['modern', 'sticky', 'playful', 'minimal'];
   const ZOOM_MIN = 0.12;
   const ZOOM_MAX = 2.0;
-  const COLUMN_WIDTH = 80;
+  const ARC_R = 120;
+  const MIN_ARC_GAP = 36;
   const ROW_GAP = 16;
   const NODE_W_TOPIC = 260;
   const NODE_W_QUESTION = 280;
@@ -403,28 +404,38 @@
     const parentPos = layout.get(itemId);
     if (!parentPos) return 0;
 
-    let qY = startY;
-    let totalH = 0;
+    const N = item.questionIds.length;
+    const heights = item.questionIds.map(qId => {
+      const q = state.entities.questions[qId];
+      return q ? estimateQuestionHeight(q) : 0;
+    });
+    const totalH = heights.reduce((sum, h, i) => sum + h + (i < N - 1 ? ROW_GAP : 0), 0);
 
-    item.questionIds.forEach(questionId => {
+    const arcCenterY = parentPos.y + parentPos.h / 2;
+    const arcCenterX = parentPos.x + parentPos.w;
+    let qY = arcCenterY - totalH / 2;
+
+    item.questionIds.forEach((questionId, i) => {
       const q = state.entities.questions[questionId];
       if (!q) return;
-      const qH = estimateQuestionHeight(q);
-      const qX = parentPos.x + parentPos.w + COLUMN_WIDTH;
+      const qH = heights[i];
+
+      const angle = N === 1 ? 0 : ((i / (N - 1)) - 0.5) * Math.PI;
+      const xGap = MIN_ARC_GAP + (ARC_R - MIN_ARC_GAP) * Math.cos(angle);
+      const qX = arcCenterX + xGap;
+
       layout.set(questionId, { x: qX, y: qY, w: NODE_W_QUESTION, h: qH });
 
-      // Recurse into each answer item
       let childY = qY;
       q.answerIds.forEach(answerId => {
         const answer = state.entities.items[answerId];
         if (!answer) return;
         layout.set(answerId, { x: qX, y: childY, w: NODE_W_QUESTION, h: 0, inline: true });
         const subtreeH = layoutSubtree(answerId, depth + 1, childY, layout);
-        childY += subtreeH;
+        childY += subtreeH || qH;
       });
 
       qY += qH + ROW_GAP;
-      totalH += qH + ROW_GAP;
     });
 
     return totalH;
@@ -477,6 +488,18 @@
         renderItemNode(nodeEl, state.entities.items[id]);
       } else {
         renderQuestionNode(nodeEl, state.entities.questions[id]);
+        const q = state.entities.questions[id];
+        const parentItem = state.entities.items[q?.parentItemId];
+        if (q && parentItem) {
+          nodeEl.dataset.dragType = 'q-' + q.parentItemId;
+          nodeEl.draggable = false;
+          const handle = nodeEl.querySelector('.q-drag-handle');
+          if (handle) {
+            handle.addEventListener('mousedown', () => { nodeEl.draggable = true; });
+            nodeEl.addEventListener('dragend', () => { nodeEl.draggable = false; });
+          }
+          wireDragAndDrop(nodeEl, parentItem.questionIds, q.id, () => renderCanvas());
+        }
       }
     });
   }
@@ -563,8 +586,9 @@
       }).join('');
 
       return `
-        <div class="answer-bullet" data-bullet-index="${bulletIndex}">
+        <div class="answer-bullet" data-answer-id="${answerId}">
           <div class="answer-bullet-row">
+            <div class="drag a-drag-handle" title="Drag to reorder answer">⋮⋮</div>
             <div class="bullet-marker"></div>
             <div class="answer-text-field" contenteditable="true" spellcheck="true" data-item-text="${answer.id}"></div>
           </div>
@@ -585,6 +609,7 @@
       <div class="node-dot" style="background:${dotColor};"></div>
       <div class="node-question-card ${activeClass}">
         <div class="node-q-header">
+          <div class="drag q-drag-handle" title="Drag to reorder question">⋮⋮</div>
           <div class="node-q-label" contenteditable="true" spellcheck="false" data-question-label="${question.id}"></div>
           <div class="node-chrome" style="display:flex;gap:4px;flex-shrink:0;">
             <button type="button" class="soft" style="padding:4px 8px;font-size:0.75rem;" data-action="delete-question">✕</button>
@@ -607,7 +632,7 @@
       attachEditable(labelEl, value => updateQuestionLabel(question.id, value), pushHistoryOnce);
     }
 
-    // Wire answer text editables
+    // Wire answer text editables and bullet drag-to-reorder
     question.answerIds.forEach(answerId => {
       const answer = state.entities.items[answerId];
       if (!answer) return;
@@ -615,6 +640,17 @@
       if (textEl) {
         setEditableContent(textEl, answer.text, 'Write an answer…');
         attachEditable(textEl, value => updateItemText(answerId, value), pushHistoryOnce);
+      }
+      const bulletEl = nodeEl.querySelector(`.answer-bullet[data-answer-id="${answerId}"]`);
+      if (bulletEl) {
+        bulletEl.dataset.dragType = 'a-' + question.id;
+        bulletEl.draggable = false;
+        const handle = bulletEl.querySelector('.a-drag-handle');
+        if (handle) {
+          handle.addEventListener('mousedown', () => { bulletEl.draggable = true; });
+          bulletEl.addEventListener('dragend', () => { bulletEl.draggable = false; });
+        }
+        wireDragAndDrop(bulletEl, question.answerIds, answerId, () => renderCanvas());
       }
     });
 
@@ -726,10 +762,10 @@
       if (!parentPos || !qPos) return;
 
       const x1 = parentPos.x + parentPos.w;
-      const y1 = parentPos.y + 44;
+      const y1 = parentPos.y + parentPos.h / 2;
       const x2 = qPos.x;
-      const y2 = qPos.y + 44;
-      const mx = Math.max(40, (x2 - x1) * 0.5);
+      const y2 = qPos.y + qPos.h / 2;
+      const mx = Math.max(20, Math.abs(x2 - x1) * 0.45);
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', `M ${x1},${y1} C ${x1 + mx},${y1} ${x2 - mx},${y2} ${x2},${y2}`);

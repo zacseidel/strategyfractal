@@ -721,6 +721,8 @@
     }
 
     .root-chip.dragging { opacity: 0.45; }
+    .node.dragging { opacity: 0.45; }
+    .answer-bullet.dragging { opacity: 0.45; background: var(--surface-hover, rgba(0,0,0,0.04)); border-radius: 6px; }
     .root-chip small, .muted { color: var(--muted); }
 
     .root-chip-label {
@@ -878,6 +880,12 @@
       background: rgba(255,255,255,0.65);
       color: var(--muted);
       font-weight: 700;
+      flex-shrink: 0;
+    }
+    .q-drag-handle, .a-drag-handle {
+      width: 22px;
+      height: 22px;
+      font-size: 0.72rem;
     }
 
     .mini-toolbar {
