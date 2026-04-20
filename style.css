@@ -451,9 +451,35 @@
     .node-text-area:focus { border-color: rgba(79,124,255,0.28); background: rgba(255,255,255,0.74); }
 
     .node-question-buttons {
-      display: flex;
+      display: none;
       flex-wrap: wrap;
       gap: 6px;
+    }
+
+    .node-topic-card:hover .node-question-buttons,
+    .node-topic-card:focus-within .node-question-buttons { display: flex; }
+
+    /* Header chrome: fade in on hover rather than jump-in */
+    .node-card-header .node-chrome {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    .node-topic-card:hover .node-card-header .node-chrome {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Body chrome (+ Source row) */
+    .node-card-body .node-chrome {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    .node-topic-card:hover .node-card-body .node-chrome,
+    .node-topic-card:focus-within .node-card-body .node-chrome {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .spawn-btn {
@@ -562,10 +588,24 @@
     .answer-text-field:focus { border-color: rgba(79,124,255,0.25); background: rgba(255,255,255,0.7); }
 
     .answer-bullet-actions {
-      display: flex;
+      display: none;
       flex-wrap: wrap;
       gap: 4px;
       padding-left: 12px;
+    }
+
+    .node-question-card:hover .answer-bullet-actions,
+    .node-question-card:focus-within .answer-bullet-actions { display: flex; }
+
+    /* Question header delete button */
+    .node-q-header .node-chrome {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    .node-question-card:hover .node-q-header .node-chrome {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .branch-spawn-btn {
@@ -588,12 +628,15 @@
     .node-q-footer {
       padding: 8px 12px;
       border-top: 1px solid var(--border);
-      display: flex;
+      display: none;
       gap: 6px;
       flex-wrap: wrap;
       align-items: center;
       background: rgba(255,255,255,0.16);
     }
+
+    .node-question-card:hover .node-q-footer,
+    .node-question-card:focus-within .node-q-footer { display: flex; }
 
     .split-btn {
       margin-left: auto;

@@ -4,10 +4,10 @@
   const THEMES = ['modern', 'sticky', 'playful', 'minimal'];
   const ZOOM_MIN = 0.12;
   const ZOOM_MAX = 2.0;
-  const COLUMN_WIDTH = 420;
-  const ROW_GAP = 24;
-  const NODE_W_TOPIC = 300;
-  const NODE_W_QUESTION = 340;
+  const COLUMN_WIDTH = 80;
+  const ROW_GAP = 16;
+  const NODE_W_TOPIC = 260;
+  const NODE_W_QUESTION = 280;
 
   const els = {
     workspace: document.getElementById('workspace'),
@@ -46,6 +46,7 @@
     closeModalBtn: document.getElementById('closeModalBtn'),
     examplesBtn: document.getElementById('examplesBtn'),
     examplesDropdown: document.getElementById('examplesDropdown'),
+    resetZoomBtn: document.getElementById('resetZoomBtn'),
   };
 
   let state = loadState() || createInitialState();
@@ -367,16 +368,16 @@
   // ── Layout engine ─────────────────────────────────────────────────────────
 
   function estimateItemHeight(item) {
-    if (!item) return 52;
-    if (item.nodeMode === 'collapsed') return 44;
+    if (!item) return 44;
+    if (item.nodeMode === 'collapsed') return 40;
     const srcH = item.sourceList.length * 64;
-    return 220 + srcH;
+    return 140 + srcH;
   }
 
   function estimateQuestionHeight(question) {
-    if (!question) return 52;
+    if (!question) return 44;
     const answerCount = Math.max(1, question.answerIds.length);
-    return 96 + answerCount * 64;
+    return 56 + answerCount * 58;
   }
 
   function computeLayout() {
@@ -807,6 +808,11 @@
       els.boardView.classList.remove('is-panning');
       persist();
     });
+  }
+
+  function resetZoom() {
+    setCanvasTransform(60, 60, 1.0);
+    renderCanvas();
   }
 
   function zoomToNode(nodeId) {
@@ -1631,6 +1637,7 @@
     els.themeSelect.addEventListener('change', e => setTheme(e.target.value));
     els.undoBtn.addEventListener('click', undo);
     els.redoBtn.addEventListener('click', redo);
+    els.resetZoomBtn.addEventListener('click', resetZoom);
     els.copyOutlineBtn.addEventListener('click', () => copyToClipboard(generateBreadthThenDrillOutline(), 'Outline copied.'));
     els.exportJsonBtn.addEventListener('click', exportJson);
     els.importJsonBtn.addEventListener('click', () => openModal({
