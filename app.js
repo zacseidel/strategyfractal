@@ -6,7 +6,6 @@
   const ZOOM_MAX = 2.0;
   const HALF_SPREAD = Math.PI * 5 / 12; // 75° fan, ~1 o'clock to ~5 o'clock
   const ARC_R_MIN = 120;
-  const EXPANDED_H_PAD = 60; // extra vertical clearance for expanded card footer
   const ROW_GAP = 16;
   const NODE_W_TOPIC = 260;
   const NODE_W_QUESTION = 280;
@@ -382,6 +381,13 @@
     return 56 + answerCount * 58;
   }
 
+  // Height when card is expanded (active): adds footer + per-bullet action buttons.
+  function estimateQuestionHeightExpanded(question) {
+    if (!question) return 120;
+    const answerCount = Math.max(1, question.answerIds.length);
+    return estimateQuestionHeight(question) + 44 + answerCount * 72;
+  }
+
   const ANSWER_H = 58; // matches estimateQuestionHeight per-answer increment
 
   // Total vertical space needed by all sub-questions hanging off an item.
@@ -440,8 +446,7 @@
 
       const slotHeights = item.questionIds.map(qId => {
         const q = state.entities.questions[qId];
-        const qH = q ? estimateQuestionHeight(q) : 0;
-        return Math.max(computeQuestionBlockH(qId), qH + EXPANDED_H_PAD);
+        return Math.max(computeQuestionBlockH(qId), q ? estimateQuestionHeightExpanded(q) : 0);
       });
       const R = computeArcR(N, slotHeights);
       const arcTopExt = R * Math.sin(HALF_SPREAD) + (slotHeights[0] || 0) / 2;
@@ -469,8 +474,7 @@
 
     const slotHeights = item.questionIds.map(qId => {
       const q = state.entities.questions[qId];
-      const qH = q ? estimateQuestionHeight(q) : 0;
-      return Math.max(computeQuestionBlockH(qId), qH + EXPANDED_H_PAD);
+      return Math.max(computeQuestionBlockH(qId), q ? estimateQuestionHeightExpanded(q) : 0);
     });
     const R = computeArcR(N, slotHeights);
 
@@ -591,9 +595,8 @@
     } else {
       // Build spawn buttons — show which default questions already exist
       const spawnBtns = DEFAULT_QUESTIONS.map(label => {
-        const exists = findQuestionByLabel(item.id, label);
         const cls = colorClassForLabel(label);
-        return `<button type="button" class="spawn-btn ${cls}${exists ? ' already-exists' : ''}" data-spawn="${escapeHtml(label)}" title="${exists ? 'Already exists' : 'Add ' + escapeHtml(label) + ' branch'}">${escapeHtml(label)}</button>`;
+        return `<button type="button" class="spawn-btn ${cls}" data-spawn="${escapeHtml(label)}" title="Add ${escapeHtml(label)} branch">${escapeHtml(label)}</button>`;
       }).join('');
 
       const sourceHtml = buildSourceEditorHtml(item);
@@ -647,9 +650,8 @@
       if (!answer) return '';
 
       const childSpawnBtns = DEFAULT_QUESTIONS.map(label => {
-        const exists = findQuestionByLabel(answerId, label);
         const bcls = colorClassForLabel(label);
-        return `<button type="button" class="branch-spawn-btn ${bcls}${exists ? ' already-exists' : ''}" data-child-spawn="${escapeHtml(label)}" data-answer-id="${answerId}" title="${exists ? 'Already exists' : 'Branch ' + escapeHtml(label)}">${escapeHtml(label)} →</button>`;
+        return `<button type="button" class="branch-spawn-btn ${bcls}" data-child-spawn="${escapeHtml(label)}" data-answer-id="${answerId}" title="Branch ${escapeHtml(label)}">${escapeHtml(label)} →</button>`;
       }).join('');
 
       return `
@@ -964,13 +966,6 @@
   function spawnQuestion(parentItemId, label) {
     const item = state.entities.items[parentItemId];
     if (!item) return;
-    const existing = findQuestionByLabel(parentItemId, label);
-    if (existing) {
-      state.ui.activeQuestionId = existing.id;
-      persist();
-      renderCanvas();
-      return;
-    }
     pushHistory();
     const q = createQuestionInternal(state, parentItemId, label);
     // Add a first blank answer item
