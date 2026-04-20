@@ -945,6 +945,7 @@
     // Add a first blank answer item
     createItemInternal(state, { kind: 'answer', text: '', parentQuestionId: q.id });
     state.ui.activeQuestionId = q.id;
+    state.ui.selectedItemId = parentItemId;
     persist();
     render();
     requestAnimationFrame(() => {
