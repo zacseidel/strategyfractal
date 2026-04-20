@@ -51,6 +51,7 @@
   let state = loadState() || createInitialState();
   let dragState = null;
   let toastTimer = null;
+  let canvasPersistTimer = null;
   let examplesManifest = null;
   let isPanning = false;
   let panStart = { x: 0, y: 0 };
@@ -501,7 +502,7 @@
       const spawnBtns = DEFAULT_QUESTIONS.map(label => {
         const exists = findQuestionByLabel(item.id, label);
         const cls = colorClassForLabel(label);
-        return `<button type="button" class="spawn-btn ${cls}${exists ? ' already-exists' : ''}" data-spawn="${escapeHtml(label)}" title="${exists ? 'Already exists' : 'Add ' + label + ' branch'}">${escapeHtml(label)}</button>`;
+        return `<button type="button" class="spawn-btn ${cls}${exists ? ' already-exists' : ''}" data-spawn="${escapeHtml(label)}" title="${exists ? 'Already exists' : 'Add ' + escapeHtml(label) + ' branch'}">${escapeHtml(label)}</button>`;
       }).join('');
 
       const sourceHtml = buildSourceEditorHtml(item);
@@ -557,7 +558,7 @@
       const childSpawnBtns = DEFAULT_QUESTIONS.map(label => {
         const exists = findQuestionByLabel(answerId, label);
         const bcls = colorClassForLabel(label);
-        return `<button type="button" class="branch-spawn-btn ${bcls}${exists ? ' already-exists' : ''}" data-child-spawn="${escapeHtml(label)}" data-answer-id="${answerId}" title="${exists ? 'Already exists' : 'Branch ' + label}">${escapeHtml(label)} →</button>`;
+        return `<button type="button" class="branch-spawn-btn ${bcls}${exists ? ' already-exists' : ''}" data-child-spawn="${escapeHtml(label)}" data-answer-id="${answerId}" title="${exists ? 'Already exists' : 'Branch ' + escapeHtml(label)}">${escapeHtml(label)} →</button>`;
       }).join('');
 
       return `
@@ -772,11 +773,13 @@
     const { panX, panY, scale } = state.ui.canvas;
     const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale * zoomFactor));
     const actualFactor = newScale / scale;
-    setCanvasTransform(
-      mouseX - (mouseX - panX) * actualFactor,
-      mouseY - (mouseY - panY) * actualFactor,
-      newScale
-    );
+    state.ui.canvas.panX = mouseX - (mouseX - panX) * actualFactor;
+    state.ui.canvas.panY = mouseY - (mouseY - panY) * actualFactor;
+    state.ui.canvas.scale = newScale;
+    applyTransform();
+    updateFidelityClass();
+    clearTimeout(canvasPersistTimer);
+    canvasPersistTimer = setTimeout(persist, 300);
   }
 
   function initPanEvents() {
@@ -904,9 +907,8 @@
     const lines = (source.text || '').split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length < 2) return;
     pushHistory();
-    // Remove the original answer
+    // Remove the original answer (deleteItemRecursive already cleans q.answerIds)
     deleteItemRecursive(source.id);
-    q.answerIds = q.answerIds.filter(id => id !== source.id);
     // Create one item per line
     lines.forEach(line => {
       createItemInternal(state, { kind: 'answer', text: line, parentQuestionId: questionId });
@@ -975,6 +977,7 @@
     const q = state.entities.questions[questionId];
     if (!q) return;
     q.answerIds.slice().forEach(answerId => deleteItemRecursive(answerId));
+    if (state.ui.activeQuestionId === questionId) state.ui.activeQuestionId = null;
     delete state.entities.questions[questionId];
   }
 
@@ -1022,6 +1025,7 @@
   function updateSource(itemId, sourceId, key, value) {
     const item = state.entities.items[itemId];
     if (!item) return;
+    if (!['label', 'url', 'note'].includes(key)) return;
     const source = item.sourceList.find(s => s.id === sourceId);
     if (!source) return;
     source[key] = value;
@@ -1519,9 +1523,10 @@
     try {
       const parsed = JSON.parse(raw);
       if (!parsed || !parsed.roots || !parsed.entities) throw new Error('Invalid JSON structure');
-      const existingHistory = state.history;
+      pushHistory();
+      const savedHistory = state.history;
       state = parsed;
-      state.history = existingHistory || { past: [], future: [] };
+      state.history = savedHistory;
       if (!state.history.past) state.history.past = [];
       if (!state.history.future) state.history.future = [];
       normalizeState();

@@ -637,6 +637,7 @@
     /* Connection lines */
     .connection-path {
       fill: none;
+      stroke: var(--blank);
       stroke-width: 2;
       opacity: 0.55;
     }
