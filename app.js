@@ -64,7 +64,7 @@
       settings: {
         theme: 'modern',
         mainView: 'board',
-        sidebarOpen: true,
+        sidebarOpen: false,
         showTopTopics: true,
       },
       ui: {

@@ -1,295 +1,138 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StrategyFractal</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="theme-modern">
 <div class="app-shell">
 
-  <!-- ═══════════════════════════════════════════
-       TOP BAR — mobile: brand + 3 actions + menu
-       desktop: brand + all toolbar groups inline
-  ════════════════════════════════════════════ -->
-
   <header class="topbar" role="banner">
-
-```
-<!-- Brand -->
-<div class="brand">
-  <div class="brand-mark" aria-hidden="true">SF</div>
-  <div class="brand-text">
-    <h1>StrategyFractal</h1>
-    <p class="brand-tagline">Nested questions, answers, sources &amp; branches</p>
-  </div>
-</div>
-
-<!-- Primary actions — always visible -->
-<div class="topbar-primary" role="toolbar" aria-label="Primary actions">
-  <button id="newRootBtn" class="btn btn-primary" title="New top-level topic (N)">
-    <span aria-hidden="true">+</span>
-    <span class="btn-label">New Topic</span>
-  </button>
-  <button id="addAnswerBtn" class="btn btn-soft" title="Add answer to the active question (A)">
-    <span aria-hidden="true">+</span>
-    <span class="btn-label">Answer</span>
-  </button>
-  <!-- Visible on desktop only via CSS -->
-  <button id="addQuestionBtn" class="btn btn-soft hide-mobile" title="Add a custom question to the selected card (Q)">
-    <span aria-hidden="true">+</span>
-    <span class="btn-label">Question</span>
-  </button>
-</div>
-
-<!-- Desktop secondary toolbar — hidden on mobile -->
-<div class="topbar-secondary hide-mobile" role="toolbar" aria-label="View controls">
-  <button id="boardViewBtn"   class="btn btn-soft">Board</button>
-  <button id="outlineViewBtn" class="btn btn-soft">Outline</button>
-  <button id="toggleTopicsBtn" class="btn btn-soft">Hide Topics</button>
-
-  <div class="divider" aria-hidden="true"></div>
-
-  <button id="undoBtn"        class="btn btn-soft" title="Undo (Ctrl+Z)">Undo</button>
-  <button id="redoBtn"        class="btn btn-soft" title="Redo (Ctrl+Shift+Z)">Redo</button>
-  <button id="copyOutlineBtn" class="btn btn-soft">Copy Outline</button>
-
-  <div class="divider" aria-hidden="true"></div>
-
-  <button id="exportJsonBtn"  class="btn btn-soft">Export</button>
-  <button id="importJsonBtn"  class="btn btn-soft">Import</button>
-
-  <div class="examples-wrap">
-    <button id="examplesBtn" class="btn btn-soft" aria-haspopup="true" aria-expanded="false">
-      Examples <span aria-hidden="true">▾</span>
-    </button>
-    <div id="examplesDropdown" class="examples-dropdown" role="menu"></div>
-  </div>
-
-  <button id="clearBtn" class="btn btn-soft">Reset</button>
-
-  <select id="themeSelect" class="theme-select" title="Color theme" aria-label="Color theme">
-    <option value="modern">Modern</option>
-    <option value="sticky">Sticky Notes</option>
-    <option value="playful">Playful</option>
-    <option value="minimal">Minimal</option>
-  </select>
-</div>
-
-<!-- Right-side icon cluster -->
-<div class="topbar-icons">
-  <!-- Search toggle (mobile expands to full-width bar) -->
-  <button id="searchToggleBtn" class="btn btn-icon" aria-label="Search" title="Search">
-    <span aria-hidden="true">🔎</span>
-  </button>
-
-  <!-- Sidebar toggle -->
-  <button id="toggleSidebarBtn" class="btn btn-icon" aria-label="Toggle outline sidebar" title="Outline sidebar">
-    <span aria-hidden="true">☰</span>
-  </button>
-
-  <!-- Overflow menu — mobile only -->
-  <button id="overflowMenuBtn" class="btn btn-icon hide-desktop" aria-label="More options" aria-haspopup="true" aria-expanded="false" title="More">
-    <span aria-hidden="true">⋯</span>
-  </button>
-</div>
-```
-
-  </header>
-
-  <!-- Search bar — collapses on mobile until toggled -->
-
-  <div id="searchBar" class="search-bar" role="search" aria-hidden="true">
-    <label for="searchInput" class="sr-only">Search</label>
-    <span class="search-icon" aria-hidden="true">🔎</span>
-    <input id="searchInput" type="search" placeholder="Search topics, questions, sources…" autocomplete="off" />
-    <button id="searchCloseBtn" class="btn btn-icon" aria-label="Close search">×</button>
-  </div>
-
-  <!-- ═══════════════════════════════════════════
-       OVERFLOW DRAWER — mobile secondary actions
-  ════════════════════════════════════════════ -->
-
-  <div id="overflowDrawer" class="drawer drawer-right" aria-label="More options" aria-hidden="true" role="dialog">
-    <div class="drawer-inner">
-      <div class="drawer-header">
-        <span class="drawer-title">Options</span>
-        <button id="closeOverflowBtn" class="btn btn-icon" aria-label="Close">×</button>
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">SF</div>
+      <div>
+        <h1>StrategyFractal</h1>
+        <p>Nested strategy questions, answers, sources, and reorderable branches.</p>
       </div>
+    </div>
 
-```
-  <nav class="drawer-nav" aria-label="Secondary actions">
+    <div class="toolbar-group" role="toolbar" aria-label="Primary actions">
+      <button id="newRootBtn" class="primary" title="New top-level topic (N)">+ New Topic</button>
+      <button id="addAnswerBtn" class="soft" title="Add answer to the active question (A)">+ Answer</button>
+      <button id="addQuestionBtn" class="soft" title="Add a custom question to the selected card (Q)">+ Custom Question</button>
+      <button id="toggleTopicsBtn" class="soft" title="Hide or show the Top-Level Topics strip">Hide Topics</button>
+      <button id="toggleSidebarBtn" class="icon-btn" title="Toggle outline sidebar" aria-label="Toggle outline sidebar">☰</button>
+    </div>
 
-    <section class="drawer-section">
-      <h2 class="drawer-section-title">Add</h2>
-      <button id="addQuestionBtnMobile" class="drawer-item" title="Add a custom question (Q)">
-        <span class="drawer-item-icon" aria-hidden="true">＋</span>
-        Custom Question
-      </button>
-    </section>
-
-    <section class="drawer-section">
-      <h2 class="drawer-section-title">View</h2>
-      <button id="boardViewBtnMobile"   class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">⬛</span> Board
-      </button>
-      <button id="outlineViewBtnMobile" class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">≡</span> Outline
-      </button>
-      <button id="toggleTopicsBtnMobile" class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">⬜</span> Toggle Topics Strip
-      </button>
-    </section>
-
-    <section class="drawer-section">
-      <h2 class="drawer-section-title">Edit</h2>
-      <button id="undoBtnMobile"        class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">↩</span> Undo
-      </button>
-      <button id="redoBtnMobile"        class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">↪</span> Redo
-      </button>
-      <button id="copyOutlineBtnMobile" class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">📋</span> Copy Outline
-      </button>
-    </section>
-
-    <section class="drawer-section">
-      <h2 class="drawer-section-title">Data</h2>
-      <button id="exportJsonBtnMobile"  class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">⬆</span> Export JSON
-      </button>
-      <button id="importJsonBtnMobile"  class="drawer-item">
-        <span class="drawer-item-icon" aria-hidden="true">⬇</span> Import JSON
-      </button>
-      <div class="examples-wrap-mobile">
-        <button id="examplesBtnMobile"  class="drawer-item" aria-haspopup="true" aria-expanded="false">
-          <span class="drawer-item-icon" aria-hidden="true">📂</span> Examples <span aria-hidden="true">▾</span>
-        </button>
-        <div id="examplesDropdownMobile" class="examples-dropdown-mobile" role="menu"></div>
-      </div>
-      <button id="clearBtnMobile"       class="drawer-item drawer-item-danger">
-        <span class="drawer-item-icon" aria-hidden="true">🗑</span> Reset Board
-      </button>
-    </section>
-
-    <section class="drawer-section">
-      <h2 class="drawer-section-title">Theme</h2>
-      <select id="themeSelectMobile" class="theme-select-mobile" aria-label="Color theme">
+    <div class="toolbar-group" role="toolbar" aria-label="View controls">
+      <button id="boardViewBtn" class="soft">Board</button>
+      <button id="outlineViewBtn" class="soft">Outline</button>
+      <select id="themeSelect" title="Color theme" aria-label="Color theme">
         <option value="modern">Modern</option>
         <option value="sticky">Sticky Notes</option>
         <option value="playful">Playful</option>
         <option value="minimal">Minimal</option>
       </select>
-    </section>
+    </div>
 
-  </nav>
-</div>
-```
+    <div class="toolbar-group" role="toolbar" aria-label="History">
+      <button id="undoBtn" class="soft" title="Undo (Ctrl/Cmd+Z)">Undo</button>
+      <button id="redoBtn" class="soft" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
+      <button id="copyOutlineBtn" class="soft">Copy Outline</button>
+    </div>
 
-  </div>
-  <!-- Overlay scrim for drawers -->
-  <div id="drawerScrim" class="drawer-scrim" aria-hidden="true"></div>
+    <div class="toolbar-group" role="toolbar" aria-label="Data">
+      <button id="exportJsonBtn" class="soft">Export JSON</button>
+      <button id="importJsonBtn" class="soft">Import JSON</button>
+      <div class="examples-wrap">
+        <button id="examplesBtn" class="soft" aria-haspopup="true">Examples ▾</button>
+        <div id="examplesDropdown" class="examples-dropdown" role="menu"></div>
+      </div>
+      <button id="clearBtn" class="soft">Reset</button>
+    </div>
 
-  <!-- ═══════════════════════════════════════════
-       WORKSPACE
-  ════════════════════════════════════════════ -->
+    <div class="search-box" role="search" title="Search items, questions, and sources">
+      <span aria-hidden="true">🔎</span>
+      <input id="searchInput" type="search" placeholder="Search…" aria-label="Search topics, questions, and sources" autocomplete="off" />
+    </div>
+  </header>
 
   <div id="workspace" class="workspace">
 
-```
-<!-- SIDEBAR — overlay drawer on mobile, inline panel on desktop -->
-<aside id="sidebar" class="sidebar drawer-left" role="complementary" aria-label="Outline navigator" aria-hidden="true">
-  <div class="sidebar-inner">
-    <div class="sidebar-header">
-      <div>
-        <div class="panel-title">Outline Navigator</div>
-        <div class="panel-subtitle">Only populated branches appear here.</div>
+    <aside class="sidebar" role="complementary" aria-label="Outline navigator">
+      <div class="sidebar-header">
+        <div>
+          <div class="panel-title">Outline Navigator</div>
+          <div class="panel-subtitle">Only populated branches appear here, so the tree stays quiet until you use a question.</div>
+        </div>
+        <button id="collapseSidebarInnerBtn" class="icon-btn" title="Hide sidebar" aria-label="Hide sidebar">×</button>
       </div>
-      <button id="collapseSidebarInnerBtn" class="btn btn-icon" aria-label="Close sidebar">×</button>
-    </div>
+      <div class="sidebar-body">
+        <section class="panel" aria-label="Tree view">
+          <div class="panel-header">
+            <div class="panel-title">Tree</div>
+            <span class="pill" id="selectionPill" aria-live="polite">No selection</span>
+          </div>
+          <div class="panel-body">
+            <div id="outlineTree" class="outline-tree" role="tree"></div>
+          </div>
+        </section>
 
-    <div class="sidebar-body">
-      <section class="panel" aria-label="Tree view">
+        <section class="panel" aria-label="Export preview">
+          <div class="panel-header">
+            <div class="panel-title">Live Outline Export</div>
+            <button id="downloadTextBtn" class="soft">Download .txt</button>
+          </div>
+          <div class="panel-body">
+            <pre id="outlineText" class="export-text" aria-live="polite"></pre>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <main class="main" role="main">
+      <section id="topTopicsPanel" class="panel topics-strip" aria-label="Top-level topics">
         <div class="panel-header">
-          <div class="panel-title">Tree</div>
-          <span class="pill" id="selectionPill" aria-live="polite">No selection</span>
+          <div>
+            <div class="panel-title">Top-Level Topics</div>
+            <div class="panel-subtitle">Drag to reorder. Hide this strip when you want a one-topic-at-a-time workspace.</div>
+          </div>
+          <div class="status">
+            <span class="pill">Drag to reorder</span>
+            <span class="pill">Auto-saved locally</span>
+            <span class="pill">Import/export ready</span>
+          </div>
         </div>
         <div class="panel-body">
-          <div id="outlineTree" class="outline-tree" role="tree"></div>
+          <div id="rootLane" class="root-lane" role="list" aria-label="Top-level topics"></div>
         </div>
       </section>
 
-      <section class="panel" aria-label="Export preview">
+      <div id="boardView" class="canvas-viewport" role="region" aria-label="Strategy board">
+        <svg id="connectionLayer" class="connection-svg" aria-hidden="true"></svg>
+        <div id="canvasWorld" class="canvas-world"></div>
+      </div>
+
+      <section id="outlineView" class="panel hidden" aria-label="Outline workspace">
         <div class="panel-header">
-          <div class="panel-title">Live Outline Export</div>
-          <button id="downloadTextBtn" class="btn btn-soft">Download .txt</button>
+          <div>
+            <div class="panel-title">Outline Workspace</div>
+            <div class="panel-subtitle">This mirrors the export: breadth-first overview first, then drill-down into each populated branch.</div>
+          </div>
+          <div class="status">
+            <span class="pill">Only meaningful branches render</span>
+            <span class="pill">Use JSON export to resume sessions</span>
+          </div>
         </div>
         <div class="panel-body">
-          <pre id="outlineText" class="export-text" aria-live="polite"></pre>
+          <pre id="outlineViewText" class="export-text"></pre>
         </div>
       </section>
-    </div>
-  </div>
-</aside>
-
-<!-- MAIN CONTENT -->
-<main class="main" role="main">
-
-  <!-- Topics strip -->
-  <section id="topTopicsPanel" class="panel topics-strip" aria-label="Top-level topics">
-    <div class="panel-header">
-      <div>
-        <div class="panel-title">Top-Level Topics</div>
-        <div class="panel-subtitle hide-mobile">Drag to reorder. Hide this strip for a focused workspace.</div>
-      </div>
-      <div class="status hide-mobile" aria-label="Status">
-        <span class="pill">Drag to reorder</span>
-        <span class="pill">Auto-saved</span>
-        <span class="pill">Import/export ready</span>
-      </div>
-    </div>
-    <div class="panel-body">
-      <div id="rootLane" class="root-lane" role="list" aria-label="Top-level topics"></div>
-    </div>
-  </section>
-
-  <!-- Board view -->
-  <div id="boardView" class="canvas-viewport" role="region" aria-label="Strategy board">
-    <svg id="connectionLayer" class="connection-svg" aria-hidden="true"></svg>
-    <div id="canvasWorld" class="canvas-world"></div>
-  </div>
-
-  <!-- Outline view -->
-  <section id="outlineView" class="panel hidden" aria-label="Outline workspace">
-    <div class="panel-header">
-      <div>
-        <div class="panel-title">Outline Workspace</div>
-        <div class="panel-subtitle hide-mobile">Breadth-first overview, then drill-down into each populated branch.</div>
-      </div>
-      <div class="status hide-mobile">
-        <span class="pill">Only meaningful branches render</span>
-        <span class="pill">Use JSON export to resume</span>
-      </div>
-    </div>
-    <div class="panel-body">
-      <pre id="outlineViewText" class="export-text"></pre>
-    </div>
-  </section>
-
-</main>
-```
+    </main>
 
   </div><!-- /workspace -->
-
-  <!-- ═══════════════════════════════════════════
-       MODAL
-  ════════════════════════════════════════════ -->
 
   <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
     <div class="modal panel">
@@ -298,10 +141,9 @@
           <div class="panel-title" id="modalTitle">Import JSON</div>
           <div class="panel-subtitle" id="modalSubtitle">Paste a StrategyFractal JSON snapshot to restore your board.</div>
         </div>
-        <button id="closeModalBtn" class="btn btn-icon" aria-label="Close modal">×</button>
+        <button id="closeModalBtn" class="icon-btn" aria-label="Close modal">×</button>
       </div>
       <div class="panel-body">
-        <!-- font-size: 16px in CSS prevents iOS auto-zoom -->
         <textarea id="modalTextarea" spellcheck="false" placeholder="Paste JSON here…" aria-label="JSON input"></textarea>
         <div class="mini-toolbar" id="modalActions" role="toolbar"></div>
       </div>
