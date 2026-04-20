@@ -48,6 +48,7 @@
     examplesBtn: document.getElementById('examplesBtn'),
     examplesDropdown: document.getElementById('examplesDropdown'),
     resetZoomBtn: document.getElementById('resetZoomBtn'),
+    arrangeBtn: document.getElementById('arrangeBtn'),
   };
 
   let state = loadState() || createInitialState();
@@ -57,6 +58,7 @@
   let examplesManifest = null;
   let isPanning = false;
   let panStart = { x: 0, y: 0 };
+  let nodeDragState = null; // free-position canvas drag for question nodes
 
   // ── Initial state ─────────────────────────────────────────────────────────
 
@@ -485,10 +487,13 @@
       const qH = estimateQuestionHeight(q);
 
       const angle = N === 1 ? 0 : -HALF_SPREAD + i * 2 * HALF_SPREAD / (N - 1);
-      const qCenterX = cx + R * Math.cos(angle);
-      const qCenterY = cy + R * Math.sin(angle);
+      const arcLeft = cx + R * Math.cos(angle);
+      const arcTop  = cy + R * Math.sin(angle) - qH / 2;
+      const qX = (q.manualX !== undefined) ? q.manualX : arcLeft;
+      const qY = (q.manualY !== undefined) ? q.manualY : arcTop;
+      const qCenterY = qY + qH / 2;
 
-      layout.set(questionId, { x: qCenterX, y: qCenterY - qH / 2, w: NODE_W_QUESTION, h: qH });
+      layout.set(questionId, { x: qX, y: qY, w: NODE_W_QUESTION, h: qH });
 
       const slotTopY = qCenterY - slotH / 2;
       let childSlotY = slotTopY;
@@ -497,7 +502,7 @@
         if (!answer) return;
         const ansSubH = computeFullSubtreeH(answerId);
         const ansSlotH = Math.max(ansSubH, ANSWER_H);
-        layout.set(answerId, { x: qCenterX, y: childSlotY, w: NODE_W_QUESTION, h: ansSlotH, inline: true });
+        layout.set(answerId, { x: qX, y: childSlotY, w: NODE_W_QUESTION, h: ansSlotH, inline: true });
         if (ansSubH > 0) layoutSubtree(answerId, depth + 1, childSlotY, layout);
         childSlotY += ansSlotH + (ai < q.answerIds.length - 1 ? ROW_GAP : 0);
       });
@@ -557,19 +562,11 @@
       } else {
         renderQuestionNode(nodeEl, state.entities.questions[id]);
         const q = state.entities.questions[id];
-        const parentItem = state.entities.items[q?.parentItemId];
-        if (q && parentItem) {
-          nodeEl.dataset.dragType = 'q-' + q.parentItemId;
-          nodeEl.draggable = false;
+        if (q) {
           const handle = nodeEl.querySelector('.q-drag-handle');
           if (handle) {
-            handle.addEventListener('mousedown', () => {
-              nodeEl.draggable = true;
-              window.addEventListener('mouseup', () => { nodeEl.draggable = false; }, { once: true });
-            });
-            nodeEl.addEventListener('dragend', () => { nodeEl.draggable = false; });
+            handle.addEventListener('mousedown', e => startNodeDrag(e, q.id, nodeEl, pos));
           }
-          wireDragAndDrop(nodeEl, parentItem.questionIds, q.id, () => renderCanvas());
         }
       }
     });
@@ -712,17 +709,41 @@
       }
       const bulletEl = nodeEl.querySelector(`.answer-bullet[data-answer-id="${answerId}"]`);
       if (bulletEl) {
-        bulletEl.dataset.dragType = 'a-' + question.id;
-        bulletEl.draggable = false;
-        const handle = bulletEl.querySelector('.a-drag-handle');
-        if (handle) {
-          handle.addEventListener('mousedown', () => {
-            bulletEl.draggable = true;
-            window.addEventListener('mouseup', () => { bulletEl.draggable = false; }, { once: true });
-          });
-          bulletEl.addEventListener('dragend', () => { bulletEl.draggable = false; });
-        }
-        wireDragAndDrop(bulletEl, question.answerIds, answerId, () => renderCanvas());
+        const dragType = 'a-' + question.id;
+        bulletEl.dataset.dragType = dragType;
+        bulletEl.draggable = true;
+        bulletEl.addEventListener('dragstart', e => {
+          if (!e.target.closest('.a-drag-handle')) { e.preventDefault(); return; }
+          e.stopPropagation();
+          dragState = { dragType, itemId: answerId, arrayRef: question.answerIds };
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', answerId);
+          bulletEl.classList.add('dragging');
+        });
+        bulletEl.addEventListener('dragend', e => {
+          e.stopPropagation();
+          dragState = null;
+          bulletEl.classList.remove('dragging');
+        });
+        bulletEl.addEventListener('dragover', e => {
+          if (!dragState || dragState.dragType !== dragType) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'move';
+        });
+        bulletEl.addEventListener('drop', e => {
+          if (!dragState || dragState.dragType !== dragType) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const from = question.answerIds.indexOf(dragState.itemId);
+          const to = question.answerIds.indexOf(answerId);
+          if (from !== -1 && to !== -1 && from !== to) {
+            pushHistory();
+            question.answerIds.splice(to, 0, question.answerIds.splice(from, 1)[0]);
+            persist();
+            renderCanvas();
+          }
+        });
       }
     });
 
@@ -890,6 +911,30 @@
     canvasPersistTimer = setTimeout(persist, 300);
   }
 
+  function startNodeDrag(e, questionId, nodeEl, pos) {
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = els.boardView.getBoundingClientRect();
+    const { panX, panY, scale } = state.ui.canvas;
+    const mx = (e.clientX - rect.left - panX) / scale;
+    const my = (e.clientY - rect.top  - panY) / scale;
+    nodeDragState = {
+      questionId, nodeEl,
+      startMX: mx, startMY: my,
+      startX: pos.x, startY: pos.y,
+    };
+    nodeEl.style.cursor = 'grabbing';
+  }
+
+  function arrangeLayout() {
+    Object.values(state.entities.questions).forEach(q => {
+      delete q.manualX;
+      delete q.manualY;
+    });
+    persist();
+    renderCanvas();
+  }
+
   function initPanEvents() {
     let didPan = false;
 
@@ -915,6 +960,20 @@
     });
 
     window.addEventListener('mousemove', e => {
+      if (nodeDragState) {
+        const rect = els.boardView.getBoundingClientRect();
+        const { panX, panY, scale } = state.ui.canvas;
+        const mx = (e.clientX - rect.left - panX) / scale;
+        const my = (e.clientY - rect.top  - panY) / scale;
+        const newX = nodeDragState.startX + (mx - nodeDragState.startMX);
+        const newY = nodeDragState.startY + (my - nodeDragState.startMY);
+        const q = state.entities.questions[nodeDragState.questionId];
+        if (q) { q.manualX = newX; q.manualY = newY; }
+        nodeDragState.nodeEl.style.left = newX + 'px';
+        nodeDragState.nodeEl.style.top  = newY + 'px';
+        renderConnections(computeLayout());
+        return;
+      }
       if (!isPanning) return;
       didPan = true;
       const newPanX = e.clientX - panStart.x;
@@ -925,6 +984,13 @@
     });
 
     window.addEventListener('mouseup', () => {
+      if (nodeDragState) {
+        nodeDragState.nodeEl.style.cursor = '';
+        persist();
+        renderCanvas();
+        nodeDragState = null;
+        return;
+      }
       if (!isPanning) return;
       isPanning = false;
       els.boardView.classList.remove('is-panning');
@@ -975,6 +1041,7 @@
     persist();
     render();
     requestAnimationFrame(() => {
+      zoomToNode(q.id);
       const answerEl = document.querySelector(`[data-node-id="${q.id}"] [data-item-text]`);
       if (answerEl) { answerEl.focus(); }
     });
@@ -1754,6 +1821,7 @@
     els.undoBtn.addEventListener('click', undo);
     els.redoBtn.addEventListener('click', redo);
     els.resetZoomBtn.addEventListener('click', resetZoom);
+    els.arrangeBtn?.addEventListener('click', arrangeLayout);
     els.copyOutlineBtn.addEventListener('click', () => copyToClipboard(generateBreadthThenDrillOutline(), 'Outline copied.'));
     els.exportJsonBtn.addEventListener('click', exportJson);
     els.importJsonBtn.addEventListener('click', () => openModal({

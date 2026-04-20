@@ -888,7 +888,9 @@
       width: 22px;
       height: 22px;
       font-size: 0.72rem;
+      cursor: grab;
     }
+    .q-drag-handle:active, .a-drag-handle:active { cursor: grabbing; }
 
     .mini-toolbar {
       display: flex;
