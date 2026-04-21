@@ -114,7 +114,6 @@
       parentQuestionId,
       sourceList: [],
       nodeMode: 'expanded',
-      pos: { x: 0, y: 0 },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -132,7 +131,6 @@
       parentItemId,
       label,
       answerIds: [],
-      pos: { x: 0, y: 0 },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -192,11 +190,9 @@
       if (!Array.isArray(item.questionIds)) item.questionIds = [];
       if (!Array.isArray(item.sourceList)) item.sourceList = [];
       if (!item.nodeMode) item.nodeMode = 'collapsed';
-      if (!item.pos) item.pos = { x: 0, y: 0 };
     });
     Object.values(state.entities.questions).forEach(q => {
       if (!Array.isArray(q.answerIds)) q.answerIds = [];
-      if (!q.pos) q.pos = { x: 0, y: 0 };
     });
 
     if (!state.entities.items[state.ui.selectedItemId]) {
@@ -383,11 +379,12 @@
     return 56 + answerCount * 58;
   }
 
-  // Height when card is expanded (active): adds footer + per-bullet action buttons.
+  // Height when card is expanded (active): footer ~44px + one focused bullet's
+  // actions ~68px. Only one bullet shows actions at a time (:focus-within),
+  // so the overhead is constant regardless of answer count.
   function estimateQuestionHeightExpanded(question) {
     if (!question) return 120;
-    const answerCount = Math.max(1, question.answerIds.length);
-    return estimateQuestionHeight(question) + 44 + answerCount * 72;
+    return estimateQuestionHeight(question) + 112;
   }
 
   const ANSWER_H = 58; // matches estimateQuestionHeight per-answer increment
@@ -448,7 +445,8 @@
 
       const slotHeights = item.questionIds.map(qId => {
         const q = state.entities.questions[qId];
-        return Math.max(computeQuestionBlockH(qId), q ? estimateQuestionHeightExpanded(q) : 0);
+        const expandedH = q ? estimateQuestionHeightExpanded(q) : 0;
+        return Math.max(computeQuestionBlockH(qId), expandedH + ROW_GAP);
       });
       const R = computeArcR(N, slotHeights);
       const arcTopExt = R * Math.sin(HALF_SPREAD) + (slotHeights[0] || 0) / 2;
@@ -476,7 +474,8 @@
 
     const slotHeights = item.questionIds.map(qId => {
       const q = state.entities.questions[qId];
-      return Math.max(computeQuestionBlockH(qId), q ? estimateQuestionHeightExpanded(q) : 0);
+      const expandedH = q ? estimateQuestionHeightExpanded(q) : 0;
+      return Math.max(computeQuestionBlockH(qId), expandedH + ROW_GAP);
     });
     const R = computeArcR(N, slotHeights);
 
@@ -487,24 +486,27 @@
       const qH = estimateQuestionHeight(q);
 
       const angle = N === 1 ? 0 : -HALF_SPREAD + i * 2 * HALF_SPREAD / (N - 1);
+      const slotCenterY = cy + R * Math.sin(angle);
       const arcLeft = cx + R * Math.cos(angle);
-      const arcTop  = cy + R * Math.sin(angle) - qH / 2;
+      const arcTop  = slotCenterY - slotH / 2 + ROW_GAP; // top-of-slot + gap, room for bottom expansion
       const qX = (q.manualX !== undefined) ? q.manualX : arcLeft;
       const qY = (q.manualY !== undefined) ? q.manualY : arcTop;
-      const qCenterY = qY + qH / 2;
 
       layout.set(questionId, { x: qX, y: qY, w: NODE_W_QUESTION, h: qH });
 
-      const slotTopY = qCenterY - slotH / 2;
-      let childSlotY = slotTopY;
+      // Place each answer's layout slot so its center matches the bullet's
+      // visual position inside the question card. The card header occupies
+      // the first 56px (matches estimateQuestionHeight base); each bullet is
+      // ANSWER_H tall. This makes connector lines and sub-question arcs
+      // originate from the correct visual location.
       q.answerIds.forEach((answerId, ai) => {
         const answer = state.entities.items[answerId];
         if (!answer) return;
         const ansSubH = computeFullSubtreeH(answerId);
         const ansSlotH = Math.max(ansSubH, ANSWER_H);
-        layout.set(answerId, { x: qX, y: childSlotY, w: NODE_W_QUESTION, h: ansSlotH, inline: true });
-        if (ansSubH > 0) layoutSubtree(answerId, depth + 1, childSlotY, layout);
-        childSlotY += ansSlotH + (ai < q.answerIds.length - 1 ? ROW_GAP : 0);
+        const bulletCenterY = qY + 56 + ai * ANSWER_H + ANSWER_H / 2;
+        layout.set(answerId, { x: qX, y: bulletCenterY - ansSlotH / 2, w: NODE_W_QUESTION, h: ansSlotH, inline: true });
+        if (ansSubH > 0) layoutSubtree(answerId, depth + 1, 0, layout);
       });
     });
 
@@ -575,10 +577,7 @@
   function renderItemNode(nodeEl, item) {
     const isSelected = state.ui.selectedItemId === item.id;
     const isExpanded = item.nodeMode === 'expanded';
-    const cc = colorClassForLabel('');
-
-    // Dot for abstract zoom
-    let dotColor = '#94a3b8';
+    const dotColor = '#94a3b8';
 
     const chipActive = isSelected ? 'is-active' : '';
 
@@ -1149,23 +1148,21 @@
       'This will delete the question and all nested answers beneath it.',
       () => {
         pushHistory();
-        const parentItemId = q.parentItemId;
         deleteQuestionRecursive(questionId);
-        const parentItem = state.entities.items[parentItemId];
-        if (parentItem) {
-          parentItem.questionIds = parentItem.questionIds.filter(id => id !== questionId);
-        }
-        if (state.ui.activeQuestionId === questionId) state.ui.activeQuestionId = null;
         persist();
         render();
       }
     );
   }
 
-  function deleteQuestionRecursive(questionId) {
+  function deleteQuestionRecursive(questionId, cleanParent = true) {
     const q = state.entities.questions[questionId];
     if (!q) return;
     q.answerIds.slice().forEach(answerId => deleteItemRecursive(answerId));
+    if (cleanParent) {
+      const parentItem = state.entities.items[q.parentItemId];
+      if (parentItem) parentItem.questionIds = parentItem.questionIds.filter(id => id !== questionId);
+    }
     if (state.ui.activeQuestionId === questionId) state.ui.activeQuestionId = null;
     delete state.entities.questions[questionId];
   }
@@ -1173,7 +1170,7 @@
   function deleteItemRecursive(itemId) {
     const item = state.entities.items[itemId];
     if (!item) return;
-    item.questionIds.slice().forEach(questionId => deleteQuestionRecursive(questionId));
+    item.questionIds.slice().forEach(questionId => deleteQuestionRecursive(questionId, false));
     if (item.parentQuestionId) {
       const pq = state.entities.questions[item.parentQuestionId];
       if (pq) pq.answerIds = pq.answerIds.filter(id => id !== itemId);
@@ -1866,12 +1863,13 @@
       }
       if (e.key === 'Escape') {
         if (els.modalBackdrop.classList.contains('open')) { closeModal(); return; }
-        // Collapse any expanded topic nodes
-        Object.values(state.entities.items).forEach(item => {
-          if (item.nodeMode === 'expanded') item.nodeMode = 'collapsed';
-        });
-        persist();
-        renderCanvas();
+        const anyExpanded = Object.values(state.entities.items).some(item => item.nodeMode === 'expanded');
+        if (anyExpanded) {
+          pushHistory();
+          Object.values(state.entities.items).forEach(item => { item.nodeMode = 'collapsed'; });
+          persist();
+          renderCanvas();
+        }
         return;
       }
       if (isInput) return;

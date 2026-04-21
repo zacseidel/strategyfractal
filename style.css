@@ -595,8 +595,7 @@
       padding-left: 12px;
     }
 
-    .node-question-card.is-active .answer-bullet-actions,
-    .node-question-card:focus-within .answer-bullet-actions { display: flex; }
+    .answer-bullet:focus-within .answer-bullet-actions { display: flex; }
 
     /* Question header delete button */
     .node-q-header .node-chrome {
